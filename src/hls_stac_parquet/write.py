@@ -9,11 +9,11 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 import obstore
-import rustac
 import typer
 from hilbertcurve.hilbertcurve import HilbertCurve
 from mgrs import MGRS
 from obstore.store import from_url
+from rustac import geoparquet_writer
 
 from hls_stac_parquet import __version__
 from hls_stac_parquet.cmr_api import HlsCollection
@@ -124,6 +124,10 @@ async def write_monthly_stac_geoparquet(
         bool,
         typer.Option(help="Skip processing if output GeoParquet file already exists"),
     ] = False,
+    batch_size: Annotated[
+        int,
+        typer.Argument(help="batch size for writing STAC items to parquet files"),
+    ] = 1000,
 ) -> None:
     """
     Write monthly STAC items to GeoParquet format.
@@ -218,17 +222,24 @@ async def write_monthly_stac_geoparquet(
 
     stac_json_links.sort(key=hilbert_sort_key)
 
-    logger.info(f"{collection.collection_id}: loading stac items")
-    stac_items, failed_links = await fetch_stac_items(
+    logger.info(f"{collection.collection_id}: loading stac items in batches")
+
+    # Create async generator for batches
+    batches = fetch_stac_items(
         [urllib.parse.urlparse(link) for link in stac_json_links],
         max_concurrent=50,
+        batch_size=batch_size,
         show_progress=True,
     )
-    if failed_links:
-        logger.warning(f"failed to retrieve {len(failed_links)} items")
 
-    for item in stac_items:
+    # Get first batch to initialize writer
+    first_batch, all_failed_links = await anext(batches)
+
+    # Add collection ID to items
+    for item in first_batch:
         item["collection"] = collection.collection_id
+
+    total_items_written = len(first_batch)
 
     # Suppress warning about store reconstruction across modules (expected behavior)
     with warnings.catch_warnings():
@@ -237,11 +248,27 @@ async def write_monthly_stac_geoparquet(
             message="Successfully reconstructed a store defined in another Python module",
             category=RuntimeWarning,
         )
-        _ = await rustac.write(
-            out_path,
-            stac_items,
-            parquet_compression="zstd(6)",
-            store=store,
-        )
 
-    logger.info(f"successfully wrote {len(stac_items)} items to {out_path}")
+        # Initialize writer with first batch and write remaining batches
+        async with geoparquet_writer(first_batch, out_path, store=store) as writer:
+            logger.info(
+                f"{collection.collection_id}: initialized writer with {len(first_batch)} items"
+            )
+
+            async for batch_items, batch_failed_links in batches:
+                # Add collection ID to items
+                for item in batch_items:
+                    item["collection"] = collection.collection_id
+
+                all_failed_links.extend(batch_failed_links)
+
+                await writer.write(batch_items)
+                total_items_written += len(batch_items)
+                logger.info(
+                    f"{collection.collection_id}: wrote batch of {len(batch_items)} items (total: {total_items_written})"
+                )
+
+    if all_failed_links:
+        logger.warning(f"failed to retrieve {len(all_failed_links)} items")
+
+    logger.info(f"successfully wrote {total_items_written} items to {out_path}")

@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from typing import Any, Dict, List
+from typing import Any, AsyncGenerator, Dict, List
 from urllib.parse import ParseResult
 
 import obstore as obs
@@ -12,20 +12,25 @@ from obstore.store import from_url
 
 
 async def fetch_stac_items(
-    stac_links: List[ParseResult], max_concurrent: int = 50, show_progress: bool = True
-) -> tuple[List[Dict[str, Any]], List[ParseResult]]:
-    """Fetch STAC items and return both successful items and failed links.
+    stac_links: List[ParseResult],
+    max_concurrent: int = 50,
+    batch_size: int = 1000,
+    show_progress: bool = True,
+) -> AsyncGenerator[tuple[list[dict[str, Any]], list[ParseResult]]]:
+    """Fetch STAC items in batches and yield them as they become available.
 
     Args:
         stac_links: List of parsed STAC JSON URLs
         max_concurrent: Maximum number of concurrent requests
+        batch_size: Number of items per batch to yield
         show_progress: Whether to show progress bar
 
-    Returns:
-        Tuple of (successful_items, failed_links)
+    Yields:
+        Tuple of (batch_items, failed_links) where batch_items is a list of STAC items
+        and failed_links is a list of ParseResults that failed in this batch
     """
     if not stac_links:
-        return [], []
+        return
 
     # Group by netloc to create stores efficiently
     # Keep track of credential providers so we can close them
@@ -65,27 +70,39 @@ async def fetch_stac_items(
                 return None, link
 
     try:
-        # Execute fetches concurrently
+        # Execute fetches concurrently and process results as they complete
         tasks = [fetch_with_error_handling(link) for link in stac_links]
 
+        batch_items = []
+        batch_failed_links = []
+        completed_count = 0
+
+        # Use as_completed to process results as they arrive
         if show_progress:
-            results = await tqdm.asyncio.tqdm.gather(
-                *tasks, desc="Fetching STAC items", total=len(tasks)
-            )
-        else:
-            results = await asyncio.gather(*tasks)
+            pbar = tqdm.asyncio.tqdm(total=len(tasks), desc="Fetching STAC items")
 
-        # Separate successful items from failed links
-        successful_items = []
-        failed_links = []
+        for coro in asyncio.as_completed(tasks):
+            item, failed_link = await coro
+            completed_count += 1
 
-        for item, failed_link in results:
             if item is not None:
-                successful_items.append(item)
+                batch_items.append(item)
             if failed_link is not None:
-                failed_links.append(failed_link)
+                batch_failed_links.append(failed_link)
 
-        return successful_items, failed_links
+            if show_progress:
+                pbar.update(1)
+
+            # Yield when batch is full or all tasks are complete
+            if len(batch_items) >= batch_size or completed_count == len(tasks):
+                if batch_items:  # Only yield if we have items
+                    yield batch_items, batch_failed_links
+                    batch_items = []
+                    batch_failed_links = []
+
+        if show_progress:
+            pbar.close()
+
     finally:
         # Close all credential providers
         for cp in credential_providers:
