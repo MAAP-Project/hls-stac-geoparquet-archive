@@ -1,19 +1,23 @@
 """Functions for writing monthly STAC GeoParquet files."""
 
+import asyncio
 import json
 import logging
 import re
 import urllib.parse
 import warnings
+from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
+from urllib.parse import ParseResult
 
 import obstore
 import typer
 from hilbertcurve.hilbertcurve import HilbertCurve
 from mgrs import MGRS
 from obstore.store import from_url
-from rustac import geoparquet_writer
+from rustac.geoparquet import geoparquet_writer
+from rustac.rustac import GeoparquetWriter
 
 from hls_stac_parquet import __version__
 from hls_stac_parquet.cmr_api import HlsCollection
@@ -31,6 +35,13 @@ logging.basicConfig(
 logging.getLogger("stac_io").setLevel("WARN")
 
 logger = logging.getLogger("hls-stac-geoparquet-archive")
+
+# Suppress warning about store reconstruction across modules (expected behavior)
+warnings.filterwarnings(
+    "ignore",
+    message="Successfully reconstructed a store defined in another Python module",
+    category=RuntimeWarning,
+)
 
 # Initialize MGRS converter and Hilbert curve (14 bits = 16384x16384 grid)
 _mgrs_converter = MGRS()
@@ -94,6 +105,96 @@ async def _check_exists(store, path) -> bool:
         return True
     except FileNotFoundError:
         return False
+
+
+def _check_complete(
+    year: int, month: int, collection: HlsCollection, actual_links: list[str]
+) -> None:
+    next_month = month + 1 if month < 12 else 1
+    next_year = year if month < 12 else year + 1
+    last_date_in_month = datetime(year=next_year, month=next_month, day=1) - timedelta(
+        days=1
+    )
+
+    # Handle partial first month if this is the origin month
+    origin_date = collection.origin_date
+    first_day = 1
+    if year == origin_date.year and month == origin_date.month:
+        first_day = origin_date.day
+        logger.info(
+            f"Origin month detected: expecting links starting from day {first_day}"
+        )
+
+    expected_links = [
+        LINK_PATH_FORMAT.format(
+            collection_id=collection.collection_id,
+            year=year,
+            month=month,
+            day=day,
+        )
+        for day in range(first_day, last_date_in_month.day + 1)
+    ]
+
+    if not set(expected_links) == set(actual_links):
+        raise ValueError(
+            f"expected these links: \n{'\n'.join(expected_links)}\n",
+            f"found these links:\n{'\n'.join(actual_links)}",
+        )
+
+
+def _hilbert_sort_key(url: str) -> int:
+    """Extract MGRS tile from URL and convert to Hilbert index for sorting."""
+    mgrs_tile = extract_mgrs_from_url(url)
+    if mgrs_tile:
+        return mgrs_to_hilbert_index(mgrs_tile)
+    else:
+        # If we can't extract MGRS, sort to end
+        logger.warning(f"Could not extract MGRS tile from URL: {url}")
+        return 2**28
+
+
+async def _producer(
+    batches: AsyncGenerator[tuple[list[dict[str, Any]], list[ParseResult]], None],
+    queue: asyncio.Queue[tuple[list[dict[str, Any]], list[ParseResult]] | None],
+) -> None:
+    """Fetch batches from async generator and enqueue them for writing."""
+    try:
+        async for batch_items, batch_failed_links in batches:
+            await queue.put((batch_items, batch_failed_links))
+    finally:
+        # Signal completion
+        await queue.put(None)
+
+
+async def _consumer(
+    queue: asyncio.Queue[tuple[list[dict[str, Any]], list[ParseResult]] | None],
+    writer: GeoparquetWriter,
+    first_batch_size: int,
+    collection_id: str,
+) -> tuple[int, list[ParseResult]]:
+    """Dequeue batches and write them to parquet."""
+    total_items = first_batch_size
+    failed_links: list[ParseResult] = []
+
+    while True:
+        chunk = await queue.get()
+
+        # Check for sentinel
+        if chunk is None:
+            break
+
+        batch_items, batch_failed_links = chunk
+        failed_links.extend(batch_failed_links)
+
+        await writer.write(batch_items)
+        total_items += len(batch_items)
+        logger.info(
+            f"{collection_id}: wrote batch of {len(batch_items)} items (total: {total_items})"
+        )
+
+        queue.task_done()
+
+    return total_items, failed_links
 
 
 async def write_monthly_stac_geoparquet(
@@ -174,99 +275,52 @@ async def write_monthly_stac_geoparquet(
     logger.info(f"{collection.collection_id}: found {len(stac_json_links)} links")
 
     if require_complete_links:
-        next_month = month + 1 if month < 12 else 1
-        next_year = year if month < 12 else year + 1
-        last_date_in_month = datetime(
-            year=next_year, month=next_month, day=1
-        ) - timedelta(days=1)
-
-        # Handle partial first month if this is the origin month
-        origin_date = collection.origin_date
-        first_day = 1
-        if year == origin_date.year and month == origin_date.month:
-            first_day = origin_date.day
-            logger.info(
-                f"Origin month detected: expecting links starting from day {first_day}"
-            )
-
-        expected_links = [
-            LINK_PATH_FORMAT.format(
-                collection_id=collection.collection_id,
-                year=year,
-                month=month,
-                day=day,
-            )
-            for day in range(first_day, last_date_in_month.day + 1)
-        ]
-
-        if not set(expected_links) == set(actual_links):
-            raise ValueError(
-                f"expected these links: \n{'\n'.join(expected_links)}\n",
-                f"found these links:\n{'\n'.join(stac_json_links)}",
-            )
+        _check_complete(
+            year=year, month=month, collection=collection, actual_links=actual_links
+        )
 
     # Sort links by Hilbert curve for optimal spatial ordering
     logger.info(
         f"{collection.collection_id}: sorting {len(stac_json_links)} links by spatial order (Hilbert curve)"
     )
 
-    def hilbert_sort_key(url: str) -> int:
-        """Extract MGRS tile and convert to Hilbert index for sorting."""
-        mgrs_tile = extract_mgrs_from_url(url)
-        if mgrs_tile:
-            return mgrs_to_hilbert_index(mgrs_tile)
-        else:
-            # If we can't extract MGRS, sort to end
-            logger.warning(f"Could not extract MGRS tile from URL: {url}")
-            return 2**28
-
-    stac_json_links.sort(key=hilbert_sort_key)
+    stac_json_links.sort(key=_hilbert_sort_key)
 
     logger.info(f"{collection.collection_id}: loading stac items in batches")
 
     # Create async generator for batches
     batches = fetch_stac_items(
         [urllib.parse.urlparse(link) for link in stac_json_links],
+        collection_id=collection.collection_id,
         max_concurrent=50,
         batch_size=batch_size,
-        show_progress=True,
     )
 
     # Get first batch to initialize writer
     first_batch, all_failed_links = await anext(batches)
 
-    # Add collection ID to items
-    for item in first_batch:
-        item["collection"] = collection.collection_id
+    queue: asyncio.Queue[tuple[list[dict[str, Any]], list[ParseResult]] | None] = (
+        asyncio.Queue(maxsize=5)
+    )
 
-    total_items_written = len(first_batch)
-
-    # Suppress warning about store reconstruction across modules (expected behavior)
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="Successfully reconstructed a store defined in another Python module",
-            category=RuntimeWarning,
+    # Initialize writer with first batch and run producer/consumer concurrently
+    async with geoparquet_writer(first_batch, out_path, store=store) as writer:
+        logger.info(
+            f"{collection.collection_id}: initialized writer with {len(first_batch)} items"
         )
 
-        # Initialize writer with first batch and write remaining batches
-        async with geoparquet_writer(first_batch, out_path, store=store) as writer:
-            logger.info(
-                f"{collection.collection_id}: initialized writer with {len(first_batch)} items"
+        producer_task = asyncio.create_task(
+            _producer(
+                batches,
+                queue,
             )
+        )
+        total_items_written, consumer_failed_links = await _consumer(
+            queue, writer, len(first_batch), collection.collection_id
+        )
+        await producer_task
 
-            async for batch_items, batch_failed_links in batches:
-                # Add collection ID to items
-                for item in batch_items:
-                    item["collection"] = collection.collection_id
-
-                all_failed_links.extend(batch_failed_links)
-
-                await writer.write(batch_items)
-                total_items_written += len(batch_items)
-                logger.info(
-                    f"{collection.collection_id}: wrote batch of {len(batch_items)} items (total: {total_items_written})"
-                )
+        all_failed_links.extend(consumer_failed_links)
 
     if all_failed_links:
         logger.warning(f"failed to retrieve {len(all_failed_links)} items")
