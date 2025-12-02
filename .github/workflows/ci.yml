@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+    - main
+    tags:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.*" 
+    
+      - name: Install dependencies
+        run: |
+          uv sync 
+
+      - name: run pre-commit
+        run: |
+          uv run pre-commit run --all-files
+
+      - name: Run tests
+        run: uv run pytest
