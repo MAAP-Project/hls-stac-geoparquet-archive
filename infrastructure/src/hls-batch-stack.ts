@@ -258,8 +258,8 @@ export class HlsBatchStack extends Stack {
           "WriteMonthlyContainer",
           {
             image: containerImage,
-            cpu: 8,
-            memory: Size.mebibytes(65536),
+            cpu: 2,
+            memory: Size.mebibytes(8192),
             jobRole,
             executionRole: jobExecutionRole,
             logging: ecs.LogDriver.awsLogs({
@@ -360,8 +360,7 @@ export class HlsBatchStack extends Stack {
         }),
         "' response.json",
       ].join(" \\\n  "),
-      description:
-        "Example command to invoke batch publisher for a date range",
+      description: "Example command to invoke batch publisher for a date range",
     });
 
     new CfnOutput(this, "ExampleWriteMonthlyCommand", {
