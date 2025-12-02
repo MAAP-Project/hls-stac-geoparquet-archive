@@ -64,7 +64,7 @@ Deploy scalable processing infrastructure with AWS CDK:
 ### Architecture
 
 - **Cache Daily Jobs**: SNS + SQS + Lambda for lightweight CMR queries (1024 MB memory, 300s timeout, max 4 concurrent)
-- **Write Monthly Jobs**: AWS Batch with memory-optimized instances (8 vCPU, 64 GB) for writing monthly STAC GeoParquet files
+- **Write Monthly Jobs**: AWS Batch with memory-optimized instances (2 vCPU, 8 GB) for writing monthly STAC GeoParquet files
 - **Storage**: S3 bucket with VPC endpoint for efficient data transfer
 - **Logging**: CloudWatch logs at `/aws/batch/hls-stac-parquet` (Batch) and `/aws/lambda/HlsBatchStack-Function*` (Lambda)
 
@@ -201,10 +201,10 @@ Submit jobs with parameters:
 ```bash
 # Submit a single write-monthly job
 aws batch submit-job \
-  --job-name "write-monthly-HLSL30-2025-01-$(date +%Y%m%d-%H%M%S)" \
+  --job-name "write-monthly-HLSS30-2025-10-$(date +%Y%m%d-%H%M%S)" \
   --job-queue "$JOB_QUEUE" \
   --job-definition "$JOB_DEFINITION" \
-  --parameters "jobType=write-monthly,collection=HLSL30,yearMonth=2025-01,dest=$DEST,requireCompleteLinks=true,skipExisting=true"
+  --parameters "jobType=write-monthly,collection=HLSS30,yearMonth=2025-10-01,dest=$DEST,requireCompleteLinks=true,skipExisting=true"
 
 # Function to submit jobs for a date range
 submit_jobs_for_range() {
@@ -217,7 +217,7 @@ submit_jobs_for_range() {
     end_date="${end_year_month}-01"
 
     while [[ "$current_date" < "$end_date" ]] || [[ "$current_date" == "$end_date" ]]; do
-        year_month=$(date -d "$current_date" +%Y-%m)
+        year_month=$(date -d "$current_date" +%Y-%m-01)
 
         echo "Submitting job for $collection $year_month"
         aws batch submit-job \
