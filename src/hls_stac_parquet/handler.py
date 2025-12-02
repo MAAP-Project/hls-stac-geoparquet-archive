@@ -34,14 +34,24 @@ def process_record(record: dict[str, Any]) -> None:
         raise ValueError("Invalid SQS record: missing 'body' field")
 
     logger.info("Parsing SQS record body")
-    body = json.loads(record["body"])
+    # Handle both string (from SQS) and dict (from Step Functions) formats
+    body = (
+        record["body"]
+        if isinstance(record["body"], dict)
+        else json.loads(record["body"])
+    )
 
     # Parse the SNS message
     if "Message" not in body:
         raise ValueError("Invalid SNS message: missing 'Message' field")
 
     logger.info("Parsing SNS message")
-    message = json.loads(body["Message"])
+    # Handle both string (from SNS) and dict (from Step Functions) formats
+    message = (
+        body["Message"]
+        if isinstance(body["Message"], dict)
+        else json.loads(body["Message"])
+    )
     logger.info(f"Processing message: {message}")
 
     # Extract and validate required parameters

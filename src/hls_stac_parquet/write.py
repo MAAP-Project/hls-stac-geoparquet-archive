@@ -34,7 +34,7 @@ logging.basicConfig(
 
 logging.getLogger("stac_io").setLevel("WARN")
 
-logger = logging.getLogger("hls-stac-geoparquet-archive")
+logger = logging.getLogger(__name__)
 
 # Suppress warning about store reconstruction across modules (expected behavior)
 warnings.filterwarnings(

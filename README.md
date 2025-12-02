@@ -63,10 +63,17 @@ Deploy scalable processing infrastructure with AWS CDK:
 
 ### Architecture
 
-- **Cache Daily Jobs**: SNS + SQS + Lambda for lightweight CMR queries (1024 MB memory, 300s timeout, max 4 concurrent)
-- **Write Monthly Jobs**: AWS Batch with memory-optimized instances (2 vCPU, 8 GB) for writing monthly STAC GeoParquet files
-- **Storage**: S3 bucket with VPC endpoint for efficient data transfer
-- **Logging**: CloudWatch logs at `/aws/batch/hls-stac-parquet` (Batch) and `/aws/lambda/HlsBatchStack-Function*` (Lambda)
+**Serverless Lambda + Step Functions:**
+- **Cache Daily Lambda**: Lightweight CMR queries (1024 MB memory, 300s timeout, max 4 concurrent)
+- **Write Monthly Lambda**: Write monthly GeoParquet files (8192 MB memory, 15min timeout, max 2 concurrent)
+- **Month Calculator Lambda**: Generate dates array for Step Functions (128 MB memory, 30s timeout)
+- **Batch Publisher Lambda**: Publish cache-daily messages for historical backfills (512 MB memory, 15min timeout)
+- **Step Functions State Machine**: Orchestrates monthly workflow (cache-daily → write-monthly)
+- **EventBridge Rules**: Automated monthly trigger on 15th of each month (disabled by default)
+- **SNS + SQS + DLQ**: Message queue for cache-daily operations with dead letter queue for failures
+- **CloudWatch Alarms**: Monitor Lambda errors, throttles, and Step Functions failures
+- **Storage**: S3 bucket for parquet data and cached STAC links
+- **Logging**: CloudWatch logs for all Lambda functions and Step Functions executions
 
 ### Deployment
 
@@ -78,7 +85,78 @@ npm run deploy
 
 ### Running Jobs
 
-#### Cache Daily STAC Links (SNS + Lambda)
+#### Automated Monthly Workflow (Step Functions)
+
+The Step Functions state machine automatically runs on the 15th of each month (when enabled) to:
+1. Calculate the previous month's date range (or use explicitly specified month)
+2. Cache STAC links for all days in that month (parallel, max 4 concurrent)
+3. Write the monthly GeoParquet file
+
+**Input Parameters:**
+
+- **`collection`** (required): Either `"HLSL30"` or `"HLSS30"`
+- **`dest`** (optional): S3 destination path (e.g., `"s3://bucket-name"`). Defaults to stack bucket
+- **`yearmonth`** (optional): Specific month to process in format `"YYYY-MM-DD"` (day is ignored). If not provided, processes previous month
+- **`version`** (optional): Version string for output path (e.g., `"v0.1.0"`). Defaults to deployed version
+
+**Manual Invocation:**
+
+```bash
+# Get the state machine ARN
+STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
+  --stack-name HlsBatchStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`MonthlyWorkflowStateMachineArn`].OutputValue' \
+  --output text)
+
+# Start execution - process previous month (default behavior)
+aws stepfunctions start-execution \
+  --state-machine-arn "$STATE_MACHINE_ARN" \
+  --name "manual-hlsl30-$(date +%Y%m%d-%H%M%S)" \
+  --input '{"collection": "HLSL30", "dest": "s3://your-bucket"}'
+
+# Start execution - process a specific month
+aws stepfunctions start-execution \
+  --state-machine-arn "$STATE_MACHINE_ARN" \
+  --name "manual-hlsl30-2024-11-$(date +%Y%m%d-%H%M%S)" \
+  --input '{"collection": "HLSL30", "dest": "s3://your-bucket", "yearmonth": "2024-11-01"}'
+
+# Start execution - with custom version
+aws stepfunctions start-execution \
+  --state-machine-arn "$STATE_MACHINE_ARN" \
+  --name "manual-hlsl30-v0.2.0-$(date +%Y%m%d-%H%M%S)" \
+  --input '{"collection": "HLSL30", "dest": "s3://your-bucket", "yearmonth": "2024-11-01", "version": "v0.2.0"}'
+
+# Monitor execution
+EXECUTION_ARN=$(aws stepfunctions list-executions \
+  --state-machine-arn "$STATE_MACHINE_ARN" \
+  --max-results 1 \
+  --query 'executions[0].executionArn' \
+  --output text)
+
+aws stepfunctions describe-execution --execution-arn "$EXECUTION_ARN"
+```
+
+**Enable Automated Monthly Runs:**
+
+```bash
+# Enable EventBridge rules (one per collection)
+HLSL30_RULE=$(aws cloudformation describe-stacks \
+  --stack-name HlsBatchStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`MonthlyRuleHLSL30`].OutputValue' \
+  --output text)
+
+HLSS30_RULE=$(aws cloudformation describe-stacks \
+  --stack-name HlsBatchStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`MonthlyRuleHLSS30`].OutputValue' \
+  --output text)
+
+aws events enable-rule --name "$HLSL30_RULE"
+aws events enable-rule --name "$HLSS30_RULE"
+```
+
+#### Manual Cache Daily STAC Links (SNS + Lambda)
+
+For ad-hoc caching or testing:
 
 Publish messages to SNS to trigger the Lambda function. Get the SNS topic ARN from CloudFormation outputs:
 
@@ -116,9 +194,9 @@ for day in {01..31}; do
 done
 ```
 
-#### Batch Publishing for Date Ranges**
+#### Historical Backfills (Batch Publisher Lambda)
 
-Use the batch publisher Lambda function to automatically publish messages for all dates in a range:
+Use the batch publisher Lambda function to rebuild the historical archive from scratch. This publishes cache-daily messages for all dates in a range:
 
 **Batch Publisher Parameters:**
 - `collection`: Required. Either "HLSL30" or "HLSS30"
@@ -144,130 +222,130 @@ BATCH_PUBLISHER_FUNCTION=$(aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs[?OutputKey==`BatchPublisherFunctionName`].OutputValue' \
   --output text)
 
-# Publish for all dates in a specific month
-payload=`echo '{ "collection": "HLSL30", "start_date": "2025-10-01", "end_date": "2025-10-31" }' | openssl base64`
+# Backfill entire collection history (HLSL30: 2013-04-11 to yesterday)
 aws lambda invoke \
   --function-name "$BATCH_PUBLISHER_FUNCTION" \
-  --payload "$payload" \
-  /tmp/response.json
+  --payload '{"collection": "HLSL30"}' \
+  response.json
 
-# Publish all available data from collection origin to yesterday
-# (start_date defaults to collection origin, end_date defaults to yesterday)
-payload=`echo '{ "collection": "HLSS30", "end_date": "2025-10-31" }' | openssl base64`
+# Backfill specific date range
 aws lambda invoke \
   --function-name "$BATCH_PUBLISHER_FUNCTION" \
-  --payload "${payload}" \
-  /tmp/response.json
+  --payload '{"collection": "HLSS30", "start_date": "2024-01-01", "end_date": "2024-12-31"}' \
+  response.json
 
-# view the logs
-BATCH_FUNCTION_NAME=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`BatchPublisherFunctionName`].OutputValue' \
-  --output text)
-
-# View recent logs (last 10 minutes)
-aws logs tail "/aws/lambda/$BATCH_FUNCTION_NAME" --follow
-
+# View logs
+aws logs tail "/aws/lambda/$BATCH_PUBLISHER_FUNCTION" --follow
 ```
 
-#### Write Monthly GeoParquet Files (AWS Batch)
+**After cache-daily completes, process monthly GeoParquet files:**
 
-First, get the job queue, job definition, and bucket name from CloudFormation:
+You can either:
+1. Use Step Functions to process each month (recommended)
+2. Invoke write-monthly Lambda directly for each month
+
+#### Write Monthly GeoParquet Files (Lambda)
+
+**Option 1: Via Step Functions (Recommended)**
 
 ```bash
-# Get job queue name
-JOB_QUEUE=$(aws cloudformation describe-stacks \
+# Process a specific month using Step Functions
+STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
   --stack-name HlsBatchStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`WriteMonthlyJobQueueArn`].OutputValue' \
-  --output text | cut -d'/' -f2)
-
-# Get job definition name
-JOB_DEFINITION=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`WriteMonthlyJobDefinitionArn`].OutputValue' \
-  --output text | cut -d'/' -f2 | cut -d':' -f1)
-
-# Get bucket name for destination
-BUCKET_NAME=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`BucketName`].OutputValue' \
+  --query 'Stacks[0].Outputs[?OutputKey==`MonthlyWorkflowStateMachineArn`].OutputValue' \
   --output text)
 
-DEST="s3://${BUCKET_NAME}"
+# This will cache all days in November 2024 and write the monthly file
+aws stepfunctions start-execution \
+  --state-machine-arn "$STATE_MACHINE_ARN" \
+  --name "backfill-2024-11-$(date +%Y%m%d-%H%M%S)" \
+  --input '{"collection": "HLSL30", "dest": "s3://your-bucket", "yearmonth": "2024-11-01"}'
 ```
 
-Submit jobs with parameters:
+**Option 2: Direct Lambda Invocation**
+
+For cases where cache-daily is already complete and you just need to write the parquet file:
 
 ```bash
-# Submit a single write-monthly job
-aws batch submit-job \
-  --job-name "write-monthly-HLSS30-2025-10-$(date +%Y%m%d-%H%M%S)" \
-  --job-queue "$JOB_QUEUE" \
-  --job-definition "$JOB_DEFINITION" \
-  --parameters "jobType=write-monthly,collection=HLSS30,yearMonth=2025-10-01,dest=$DEST,requireCompleteLinks=true,skipExisting=true"
+# Get the write-monthly Lambda function name
+WRITE_MONTHLY_FUNCTION=$(aws cloudformation describe-stacks \
+  --stack-name HlsBatchStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`WriteMonthlyFunctionName`].OutputValue' \
+  --output text)
 
-# Function to submit jobs for a date range
-submit_jobs_for_range() {
-    local collection=$1
-    local start_year_month=$2  # Format: YYYY-MM
-    local end_year_month=$3    # Format: YYYY-MM
+# Invoke for a specific month
+aws lambda invoke \
+  --function-name "$WRITE_MONTHLY_FUNCTION" \
+  --payload '{"collection": "HLSL30", "yearmonth": "2024-11-01"}' \
+  response.json && cat response.json
 
-    # Convert to first day of month for date arithmetic
-    current_date="${start_year_month}-01"
-    end_date="${end_year_month}-01"
-
-    while [[ "$current_date" < "$end_date" ]] || [[ "$current_date" == "$end_date" ]]; do
-        year_month=$(date -d "$current_date" +%Y-%m-01)
-
-        echo "Submitting job for $collection $year_month"
-        aws batch submit-job \
-          --job-name "write-monthly-${collection}-${year_month}-$(date +%Y%m%d-%H%M%S)" \
-          --job-queue "$JOB_QUEUE" \
-          --job-definition "$JOB_DEFINITION" \
-          --parameters "jobType=write-monthly,collection=${collection},yearMonth=${year_month},dest=$DEST,requireCompleteLinks=true,skipExisting=true"
-
-        # Move to next month
-        current_date=$(date -d "$current_date + 1 month" +%Y-%m-01)
-    done
-}
-
-# Submit for entire collection history
-submit_jobs_for_range "HLSL30" "2013-04" "2025-10"
-submit_jobs_for_range "HLSS30" "2015-11" "2025-10"
-
-# Or submit for specific ranges
-submit_jobs_for_range "HLSL30" "2024-01" "2024-12"
+# View logs
+aws logs tail "/aws/lambda/$WRITE_MONTHLY_FUNCTION" --follow
 ```
 
 **Available Parameters:**
-- `jobType`: Always "write-monthly"
 - `collection`: "HLSL30" or "HLSS30"
-- `yearMonth`: Format "YYYY-MM" (e.g., "2024-01")
-- `dest`: S3 destination path (e.g., "s3://bucket-name")
-- `requireCompleteLinks`: "true" or "false" (default: "true") - require all daily cache files before processing
-- `skipExisting`: "true" or "false" (default: "true") - skip if output file already exists
-- `version`: Version string for output path (e.g., "v0.1.0") or "none" use the deployed version
+- `yearmonth`: Format "YYYY-MM-DD" (e.g., "2024-01-01") - day is ignored
+- `dest`: Optional. S3 destination path (e.g., "s3://bucket-name"), defaults to stack bucket
+- `require_complete_links`: Optional. Boolean (default: true) - require all daily cache files before processing
+- `skip_existing`: Optional. Boolean (default: true) - skip if output file already exists
+- `version`: Optional. Version string for output path (e.g., "v0.1.0"), defaults to deployed version
+- `batch_size`: Optional. Number of items per batch (default: 1000)
 
 
 ### Monitoring
 
-#### Lambda Function (Cache Daily)
+#### Step Functions Workflow
 
-View recent logs:
+View execution status and logs:
 
 ```bash
-# Get the Lambda function name
-LAMBDA_FUNCTION_NAME=$(aws cloudformation describe-stacks \
+# Get state machine ARN
+STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
+  --stack-name HlsBatchStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`MonthlyWorkflowStateMachineArn`].OutputValue' \
+  --output text)
+
+# List recent executions
+aws stepfunctions list-executions \
+  --state-machine-arn "$STATE_MACHINE_ARN" \
+  --max-results 10
+
+# Get details of specific execution
+aws stepfunctions describe-execution \
+  --execution-arn <execution-arn>
+
+# View execution history (see each step)
+aws stepfunctions get-execution-history \
+  --execution-arn <execution-arn> \
+  --max-results 100
+
+# View Step Functions logs
+aws logs tail /aws/vendedlogs/states/hls-monthly-workflow --follow
+```
+
+#### Lambda Functions
+
+View Lambda logs:
+
+```bash
+# Cache-daily Lambda
+CACHE_DAILY_FUNCTION=$(aws cloudformation describe-stacks \
   --stack-name HlsBatchStack \
   --query 'Stacks[0].Outputs[?OutputKey==`LambdaFunctionName`].OutputValue' \
   --output text)
+aws logs tail "/aws/lambda/$CACHE_DAILY_FUNCTION" --follow
 
-# View recent logs (last 10 minutes)
-aws logs tail "/aws/lambda/${LAMBDA_FUNCTION_NAME}" --follow
+# Write-monthly Lambda
+WRITE_MONTHLY_FUNCTION=$(aws cloudformation describe-stacks \
+  --stack-name HlsBatchStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`WriteMonthlyFunctionName`].OutputValue' \
+  --output text)
+aws logs tail "/aws/lambda/$WRITE_MONTHLY_FUNCTION" --follow
 
-# Check for errors in the last hour
+# Check for errors
 aws logs filter-events \
-  --log-group-name "/aws/lambda/$LAMBDA_FUNCTION_NAME" \
+  --log-group-name "/aws/lambda/$CACHE_DAILY_FUNCTION" \
   --filter-pattern "ERROR" \
   --start-time $(date -d '1 hour ago' +%s)000
 ```
@@ -297,16 +375,25 @@ aws sqs get-queue-attributes \
   --attribute-names ApproximateNumberOfMessages
 ```
 
-#### Batch Jobs (Write Monthly)
+#### CloudWatch Alarms
+
+Subscribe to alerts for failures:
 
 ```bash
-# List recent jobs
-aws batch list-jobs \
-  --job-queue HlsBatchStack-HlsWriteMonthlyJobQueue \
-  --job-status RUNNING
+# Get alert topic ARN
+ALERT_TOPIC_ARN=$(aws cloudformation describe-stacks \
+  --stack-name HlsBatchStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlertTopicArn`].OutputValue' \
+  --output text)
 
-# View job logs
-aws logs tail /aws/batch/hls-stac-parquet --follow
+# Subscribe your email
+aws sns subscribe \
+  --topic-arn "$ALERT_TOPIC_ARN" \
+  --protocol email \
+  --notification-endpoint your-email@example.com
+
+# View alarm status
+aws cloudwatch describe-alarms --alarm-name-prefix HlsBatchStack
 ```
 
 ### Cleanup

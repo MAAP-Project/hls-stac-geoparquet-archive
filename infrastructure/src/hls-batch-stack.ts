@@ -6,10 +6,10 @@ import {
   StackProps,
   Stack,
   Tags,
-  aws_batch as batch,
-  aws_ec2 as ec2,
-  aws_ecs as ecs,
-  aws_iam as iam,
+  aws_cloudwatch as cloudwatch,
+  aws_cloudwatch_actions as cloudwatch_actions,
+  aws_events as events,
+  aws_events_targets as targets,
   aws_lambda as lambda,
   aws_lambda_event_sources as lambdaEventSources,
   aws_logs as logs,
@@ -17,29 +17,13 @@ import {
   aws_sns as sns,
   aws_sns_subscriptions as snsSubscriptions,
   aws_sqs as sqs,
+  aws_stepfunctions as sfn,
+  aws_stepfunctions_tasks as tasks,
 } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as path from "path";
 
 export interface HlsBatchStackProps extends StackProps {
-  /**
-   * VPC CIDR block for the batch environment
-   * @default '10.0.0.0/16'
-   */
-  vpcCidr?: string;
-
-  /**
-   * Maximum vCPUs for the batch compute environment
-   * @default 8
-   */
-  maxvCpus?: number;
-
-  /**
-   * Instance types to use for batch compute environment
-   * @default ['m5', 'c5', 'r5']
-   */
-  instanceTypes?: ec2.InstanceType[];
-
   /**
    * S3 bucket name for storing parquet data
    * If not provided, a bucket will be created
@@ -54,35 +38,13 @@ export class HlsBatchStack extends Stack {
   public readonly snsTopic: sns.Topic;
   public readonly lambdaFunction: lambda.Function;
   public readonly batchPublisherFunction: lambda.Function;
-  public readonly writeMonthlyJobQueue: batch.JobQueue;
-  public readonly writeMonthlyJobDefinition: batch.EcsJobDefinition;
+  public readonly writeMonthlyFunction: lambda.Function;
+  public readonly monthCalculatorFunction: lambda.Function;
+  public readonly alertTopic: sns.Topic;
+  public readonly monthlyWorkflowStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props?: HlsBatchStackProps) {
     super(scope, id, props);
-
-    // Create VPC for Batch environment
-    const vpc = new ec2.Vpc(this, "HlsBatchVpc", {
-      ipAddresses: ec2.IpAddresses.cidr(props?.vpcCidr || "10.0.0.0/16"),
-      maxAzs: 2,
-      natGateways: 0,
-      subnetConfiguration: [
-        {
-          cidrMask: 24,
-          name: "public",
-          subnetType: ec2.SubnetType.PUBLIC,
-        },
-        {
-          cidrMask: 24,
-          name: "private",
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-        },
-      ],
-    });
-
-    // Add S3 VPC endpoint for private S3 access
-    vpc.addGatewayEndpoint("S3Endpoint", {
-      service: ec2.GatewayVpcEndpointAwsService.S3,
-    });
 
     // Create S3 bucket for storing parquet data
     this.bucket = new s3.Bucket(this, "HlsParquetBucket", {
@@ -91,40 +53,6 @@ export class HlsBatchStack extends Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: RemovalPolicy.RETAIN,
     });
-
-    // Create CloudWatch log group
-    const logGroup = new logs.LogGroup(this, "HlsBatchLogGroup", {
-      logGroupName: "/aws/batch/hls-stac-parquet",
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
-
-    // Create IAM role for Batch job execution
-    const jobExecutionRole = new iam.Role(this, "HlsBatchJobExecutionRole", {
-      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName(
-          "service-role/AmazonECSTaskExecutionRolePolicy",
-        ),
-      ],
-    });
-
-    // Create IAM role for the Batch job (task role)
-    const jobRole = new iam.Role(this, "HlsBatchJobRole", {
-      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-    });
-
-    this.bucket.grantReadWrite(jobRole);
-    logGroup.grantWrite(jobRole);
-
-    // Add STS assume role permission for HLS data access
-    jobRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["sts:AssumeRole"],
-        resources: ["*"],
-      }),
-    );
 
     // Create dead letter queue
     this.deadLetterQueue = new sqs.Queue(this, "DeadLetterQueue", {
@@ -207,93 +135,368 @@ export class HlsBatchStack extends Stack {
     // Grant batch publisher permission to publish to SNS topic
     this.snsTopic.grantPublish(this.batchPublisherFunction);
 
-    // Create Batch compute environment for write-monthly jobs (larger, memory-optimized)
-    const writeMonthlyComputeEnvironment =
-      new batch.ManagedEc2EcsComputeEnvironment(
-        this,
-        "HlsWriteMonthlyComputeEnv",
-        {
-          vpc,
-          vpcSubnets: {
-            subnetType: ec2.SubnetType.PUBLIC,
-          },
-          maxvCpus: props?.maxvCpus || 32,
-          useOptimalInstanceClasses: true,
-          allocationStrategy: batch.AllocationStrategy.BEST_FIT_PROGRESSIVE,
-          spot: false,
-        },
-      );
-
-    // Job queue for write-monthly jobs
-    this.writeMonthlyJobQueue = new batch.JobQueue(
+    // Create the write-monthly Lambda function
+    this.writeMonthlyFunction = new lambda.Function(
       this,
-      "HlsWriteMonthlyJobQueue",
+      "WriteMonthlyFunction",
       {
-        priority: 1,
-        computeEnvironments: [
+        runtime: lambdaRuntime,
+        handler: "hls_stac_parquet.write_handler.handler",
+        code: lambda.Code.fromDockerBuild(path.join(__dirname, "../../"), {
+          file: "infrastructure/Dockerfile.lambda",
+          platform: "linux/amd64",
+          buildArgs: {
+            PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
+          },
+        }),
+        memorySize: 8192,
+        timeout: Duration.minutes(15),
+        ephemeralStorageSize: Size.gibibytes(10),
+        reservedConcurrentExecutions: 2,
+        logRetention: logs.RetentionDays.ONE_WEEK,
+        environment: {
+          BUCKET_NAME: this.bucket.bucketName,
+          EARTHDATA_USERNAME: process.env.EARTHDATA_USERNAME || "",
+          EARTHDATA_PASSWORD: process.env.EARTHDATA_PASSWORD || "",
+        },
+      },
+    );
+
+    // Grant write-monthly Lambda permissions to read/write to S3 bucket
+    this.bucket.grantReadWrite(this.writeMonthlyFunction);
+
+    // Create the month calculator Lambda function (lightweight, no Docker build)
+    this.monthCalculatorFunction = new lambda.Function(
+      this,
+      "MonthCalculatorFunction",
+      {
+        runtime: lambdaRuntime,
+        handler: "month_calculator.handler",
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+        memorySize: 128,
+        timeout: Duration.seconds(30),
+        logRetention: logs.RetentionDays.ONE_WEEK,
+      },
+    );
+
+    // Create SNS topic for alerts
+    this.alertTopic = new sns.Topic(this, "AlertTopic", {
+      displayName: "HLS Monthly Workflow Alerts",
+    });
+
+    // Step Functions State Machine for Monthly Workflow
+
+    // Step 1: Calculate previous month and generate dates array
+    const calculatePreviousMonth = new tasks.LambdaInvoke(
+      this,
+      "CalculatePreviousMonth",
+      {
+        lambdaFunction: this.monthCalculatorFunction,
+        outputPath: "$.Payload",
+        comment: "Calculate previous month and generate array of dates",
+      },
+    );
+
+    // Step 2: Map state to process all dates in parallel
+    const cacheAllDays = new sfn.Map(this, "CacheAllDays", {
+      itemsPath: "$.dates",
+      maxConcurrency: 4, // Match cache-daily Lambda reserved concurrency
+      resultPath: "$.cacheResults",
+      comment: "Process cache-daily for each date in parallel",
+    });
+
+    // Cache-daily Lambda invocation for each date
+    // Format the payload to match the existing SQS event structure
+    const cacheDailyTask = new tasks.LambdaInvoke(this, "CacheDailyTask", {
+      lambdaFunction: this.lambdaFunction,
+      payload: sfn.TaskInput.fromObject({
+        Records: [
           {
-            computeEnvironment: writeMonthlyComputeEnvironment,
-            order: 1,
+            "messageId.$": "$$.Execution.Id",
+            body: {
+              Message: {
+                "date.$": "$.date",
+                "collection.$": "$.collection",
+                "dest.$": "$.dest",
+                "skip_existing.$": "$.skip_existing",
+              },
+            },
           },
         ],
-      },
-    );
+      }),
+      resultPath: "$.result",
+      comment: "Invoke cache-daily Lambda for a single date",
+    });
 
-    // Create Docker image asset (shared by both job definitions)
-    const containerImage = ecs.ContainerImage.fromAsset(
-      path.join(__dirname, "../../"),
-      {
-        file: "infrastructure/Dockerfile.ecr",
-      },
-    );
+    // Add retry logic for failed dates
+    cacheDailyTask.addRetry({
+      errors: ["States.TaskFailed", "Lambda.ServiceException"],
+      interval: Duration.seconds(30),
+      maxAttempts: 2,
+      backoffRate: 2,
+    });
 
-    // Job Definition 2: Write Monthly STAC GeoParquet
-    this.writeMonthlyJobDefinition = new batch.EcsJobDefinition(
+    // Configure the Map iterator
+    cacheAllDays.itemProcessor(cacheDailyTask);
+
+    // Step 3: Write monthly parquet
+    // Build payload dynamically to conditionally include version
+    const writeMonthly = new tasks.LambdaInvoke(this, "WriteMonthly", {
+      lambdaFunction: this.writeMonthlyFunction,
+      payload: sfn.TaskInput.fromObject({
+        "collection.$": "$.collection",
+        "yearmonth.$": "$.yearMonth",
+        "dest.$": "$.dest",
+        "version.$": "$.version", // Pass through version if present
+        require_complete_links: true,
+        skip_existing: true,
+      }),
+      outputPath: "$.Payload",
+      comment: "Write monthly GeoParquet file",
+    });
+
+    // Add retry logic to write-monthly step
+    writeMonthly.addRetry({
+      errors: ["States.TaskFailed", "States.Timeout"],
+      interval: Duration.minutes(2),
+      maxAttempts: 2,
+      backoffRate: 1.5,
+    });
+
+    // Success state
+    const success = new sfn.Succeed(this, "WorkflowSuccess", {
+      comment: "Monthly workflow completed successfully",
+    });
+
+    // Failure state
+    const failure = new sfn.Fail(this, "WorkflowFailure", {
+      error: "MonthlyWorkflowFailed",
+      cause: "Monthly workflow failed during execution",
+    });
+
+    // Add error handler to write-monthly step
+    writeMonthly.addCatch(failure, {
+      errors: ["States.ALL"],
+      resultPath: "$.error",
+    });
+
+    // Chain the states together
+    const definition = calculatePreviousMonth
+      .next(cacheAllDays)
+      .next(writeMonthly)
+      .next(success);
+
+    // Create state machine
+    this.monthlyWorkflowStateMachine = new sfn.StateMachine(
       this,
-      "WriteMonthlyJobDefinition",
+      "MonthlyWorkflowStateMachine",
       {
-        jobDefinitionName: "hls-write-monthly-stac-parquet",
-        container: new batch.EcsEc2ContainerDefinition(
-          this,
-          "WriteMonthlyContainer",
-          {
-            image: containerImage,
-            cpu: 2,
-            memory: Size.mebibytes(8192),
-            jobRole,
-            executionRole: jobExecutionRole,
-            logging: ecs.LogDriver.awsLogs({
-              logGroup,
-              streamPrefix: "hls-write-monthly",
-            }),
-            environment: {
-              AWS_DEFAULT_REGION: this.region,
-              EARTHDATA_USERNAME: process.env.EARTHDATA_USERNAME || "",
-              EARTHDATA_PASSWORD: process.env.EARTHDATA_PASSWORD || "",
-            },
-            command: [
-              "Ref::jobType",
-              "Ref::collection",
-              "Ref::yearMonth",
-              "Ref::dest",
-              "Ref::version",
-              "Ref::requireCompleteLinks",
-              "Ref::skipExisting",
-            ],
-          },
-        ),
-        parameters: {
-          jobType: "write-monthly",
-          collection: "",
-          yearMonth: "",
-          dest: `s3://${this.bucket.bucketName}`,
-          version: "none",
-          requireCompleteLinks: "true",
-          skipExisting: "false",
+        definitionBody: sfn.DefinitionBody.fromChainable(definition),
+        timeout: Duration.hours(1),
+        comment: "Orchestrates monthly cache-daily → write-monthly workflow",
+        tracingEnabled: true,
+        logs: {
+          destination: new logs.LogGroup(this, "StateMachineLogGroup", {
+            logGroupName: "/aws/vendedlogs/states/hls-monthly-workflow",
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: RemovalPolicy.DESTROY,
+          }),
+          level: sfn.LogLevel.ALL,
         },
-        retryAttempts: 3,
-        timeout: Duration.minutes(60),
       },
+    );
+
+    // EventBridge Rules for Monthly Trigger (15th of each month)
+    // Rule for HLSL30 (10:00 AM UTC)
+    const hlsl30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSL30", {
+      schedule: events.Schedule.cron({
+        minute: "0",
+        hour: "10",
+        day: "15",
+        month: "*",
+        year: "*",
+      }),
+      description:
+        "Trigger monthly HLS workflow for HLSL30 on 15th of each month",
+      enabled: true,
+    });
+
+    hlsl30MonthlyRule.addTarget(
+      new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
+        input: events.RuleTargetInput.fromObject({
+          collection: "HLSL30",
+          dest: `s3://${this.bucket.bucketName}`,
+          time: events.EventField.time,
+        }),
+      }),
+    );
+
+    // Rule for HLSS30 (11:00 AM UTC, 1 hour later to avoid overlap)
+    const hlss30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSS30", {
+      schedule: events.Schedule.cron({
+        minute: "0",
+        hour: "11",
+        day: "15",
+        month: "*",
+        year: "*",
+      }),
+      description:
+        "Trigger monthly HLS workflow for HLSS30 on 15th of each month",
+      enabled: true,
+    });
+
+    hlss30MonthlyRule.addTarget(
+      new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
+        input: events.RuleTargetInput.fromObject({
+          collection: "HLSS30",
+          dest: `s3://${this.bucket.bucketName}`,
+          time: events.EventField.time,
+        }),
+      }),
+    );
+
+    // CloudWatch Alarms for monitoring
+
+    // Alarm for write-monthly Lambda errors
+    const writeMonthlyErrorAlarm = new cloudwatch.Alarm(
+      this,
+      "WriteMonthlyErrorAlarm",
+      {
+        metric: this.writeMonthlyFunction.metricErrors({
+          period: Duration.minutes(5),
+          statistic: "Sum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        alarmDescription: "Alert when write-monthly Lambda function fails",
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    writeMonthlyErrorAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.alertTopic),
+    );
+
+    // Alarm for write-monthly Lambda success
+    const writeMonthlySuccessAlarm = new cloudwatch.Alarm(
+      this,
+      "WriteMonthlySuccessAlarm",
+      {
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/Lambda",
+          metricName: "Invocations",
+          dimensionsMap: {
+            FunctionName: this.writeMonthlyFunction.functionName,
+          },
+          period: Duration.minutes(5),
+          statistic: "Sum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        alarmDescription:
+          "Notify when write-monthly Lambda completes successfully",
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    writeMonthlySuccessAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.alertTopic),
+    );
+
+    // Alarm for write-monthly Lambda throttles
+    const writeMonthlyThrottleAlarm = new cloudwatch.Alarm(
+      this,
+      "WriteMonthlyThrottleAlarm",
+      {
+        metric: this.writeMonthlyFunction.metricThrottles({
+          period: Duration.minutes(5),
+          statistic: "Sum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        alarmDescription: "Alert when write-monthly Lambda is throttled",
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    writeMonthlyThrottleAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.alertTopic),
+    );
+
+    // Alarm for cache-daily Lambda errors
+    const cacheDailyErrorAlarm = new cloudwatch.Alarm(
+      this,
+      "CacheDailyErrorAlarm",
+      {
+        metric: this.lambdaFunction.metricErrors({
+          period: Duration.minutes(5),
+          statistic: "Sum",
+        }),
+        threshold: 5, // Allow a few failures, but alert if many dates fail
+        evaluationPeriods: 1,
+        alarmDescription: "Alert when cache-daily Lambda has multiple failures",
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    cacheDailyErrorAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.alertTopic),
+    );
+
+    // Alarm for Step Functions execution failures
+    const stateMachineFailureAlarm = new cloudwatch.Alarm(
+      this,
+      "StateMachineFailureAlarm",
+      {
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsFailed",
+          dimensionsMap: {
+            StateMachineArn: this.monthlyWorkflowStateMachine.stateMachineArn,
+          },
+          period: Duration.minutes(5),
+          statistic: "Sum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        alarmDescription: "Alert when Step Functions workflow fails",
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    stateMachineFailureAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.alertTopic),
+    );
+
+    // Alarm for Step Functions execution timeouts
+    const stateMachineTimeoutAlarm = new cloudwatch.Alarm(
+      this,
+      "StateMachineTimeoutAlarm",
+      {
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsTimedOut",
+          dimensionsMap: {
+            StateMachineArn: this.monthlyWorkflowStateMachine.stateMachineArn,
+          },
+          period: Duration.minutes(5),
+          statistic: "Sum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        alarmDescription: "Alert when Step Functions workflow times out",
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    stateMachineTimeoutAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.alertTopic),
     );
 
     // Create outputs
@@ -327,6 +530,41 @@ export class HlsBatchStack extends Stack {
       description: "Lambda function ARN for batch publishing date ranges",
     });
 
+    new CfnOutput(this, "WriteMonthlyFunctionName", {
+      value: this.writeMonthlyFunction.functionName,
+      description: "Lambda function name for write-monthly operations",
+    });
+
+    new CfnOutput(this, "WriteMonthlyFunctionArn", {
+      value: this.writeMonthlyFunction.functionArn,
+      description: "Lambda function ARN for write-monthly operations",
+    });
+
+    new CfnOutput(this, "MonthCalculatorFunctionName", {
+      value: this.monthCalculatorFunction.functionName,
+      description: "Lambda function name for month calculator",
+    });
+
+    new CfnOutput(this, "MonthlyWorkflowStateMachineArn", {
+      value: this.monthlyWorkflowStateMachine.stateMachineArn,
+      description: "Step Functions state machine ARN for monthly workflow",
+    });
+
+    new CfnOutput(this, "AlertTopicArn", {
+      value: this.alertTopic.topicArn,
+      description: "SNS topic ARN for workflow alerts",
+    });
+
+    new CfnOutput(this, "MonthlyRuleHLSL30", {
+      value: hlsl30MonthlyRule.ruleName,
+      description: "EventBridge rule name for HLSL30 monthly trigger",
+    });
+
+    new CfnOutput(this, "MonthlyRuleHLSS30", {
+      value: hlss30MonthlyRule.ruleName,
+      description: "EventBridge rule name for HLSS30 monthly trigger",
+    });
+
     new CfnOutput(this, "QueueUrl", {
       value: this.lambdaQueue.queueUrl,
       description: "SQS queue URL for cache-daily Lambda function",
@@ -335,16 +573,6 @@ export class HlsBatchStack extends Stack {
     new CfnOutput(this, "DeadLetterQueueUrl", {
       value: this.deadLetterQueue.queueUrl,
       description: "Dead letter queue URL for failed cache-daily messages",
-    });
-
-    new CfnOutput(this, "WriteMonthlyJobQueueArn", {
-      value: this.writeMonthlyJobQueue.jobQueueArn,
-      description: "AWS Batch job queue ARN for write-monthly jobs",
-    });
-
-    new CfnOutput(this, "WriteMonthlyJobDefinitionArn", {
-      value: this.writeMonthlyJobDefinition.jobDefinitionArn,
-      description: "AWS Batch job definition ARN for writing monthly parquet",
     });
 
     // Output example job submission commands
@@ -363,15 +591,48 @@ export class HlsBatchStack extends Stack {
       description: "Example command to invoke batch publisher for a date range",
     });
 
-    new CfnOutput(this, "ExampleWriteMonthlyCommand", {
+    new CfnOutput(this, "ExampleWriteMonthlyLambdaCommand", {
       value: [
-        "aws batch submit-job",
-        '--job-name "hls-write-monthly-$(date +%Y%m%d-%H%M%S)"',
-        `--job-queue ${this.writeMonthlyJobQueue.jobQueueName}`,
-        `--job-definition ${this.writeMonthlyJobDefinition.jobDefinitionName}`,
-        `--parameters 'collection=HLSL30,yearMonth=2024-01-01,dest=s3://${this.bucket.bucketName}/data'`,
+        "aws lambda invoke",
+        `--function-name ${this.writeMonthlyFunction.functionName}`,
+        "--payload '",
+        JSON.stringify({
+          collection: "HLSL30",
+          yearmonth: "2024-11-01",
+        }),
+        "' response.json && cat response.json",
       ].join(" \\\n  "),
-      description: "Example command to submit a write-monthly batch job",
+      description:
+        "Example command to invoke write-monthly Lambda function directly",
+    });
+
+    new CfnOutput(this, "ExampleStepFunctionsCommand", {
+      value: [
+        "# Process previous month (default):",
+        "aws stepfunctions start-execution",
+        `--state-machine-arn ${this.monthlyWorkflowStateMachine.stateMachineArn}`,
+        '--name "test-$(date +%Y%m%d-%H%M%S)"',
+        "--input '",
+        JSON.stringify({
+          collection: "HLSL30",
+          dest: `s3://${this.bucket.bucketName}`,
+        }),
+        "'",
+        "",
+        "# Process specific month with version:",
+        "aws stepfunctions start-execution",
+        `--state-machine-arn ${this.monthlyWorkflowStateMachine.stateMachineArn}`,
+        '--name "test-2024-11-$(date +%Y%m%d-%H%M%S)"',
+        "--input '",
+        JSON.stringify({
+          collection: "HLSL30",
+          dest: `s3://${this.bucket.bucketName}`,
+          yearmonth: "2024-11-01",
+          version: "v0.1.0",
+        }),
+        "'",
+      ].join(" \\\n  "),
+      description: "Example commands to test Step Functions workflow",
     });
 
     // Add tags
