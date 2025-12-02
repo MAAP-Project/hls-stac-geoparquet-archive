@@ -152,7 +152,6 @@ export class HlsBatchStack extends Stack {
         memorySize: 8192,
         timeout: Duration.minutes(15),
         ephemeralStorageSize: Size.gibibytes(10),
-        reservedConcurrentExecutions: 2,
         logRetention: logs.RetentionDays.ONE_WEEK,
         environment: {
           BUCKET_NAME: this.bucket.bucketName,
