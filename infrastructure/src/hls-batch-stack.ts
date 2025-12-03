@@ -37,11 +37,12 @@ export class HlsBatchStack extends Stack {
   public readonly deadLetterQueue: sqs.Queue;
   public readonly snsTopic: sns.Topic;
   public readonly lambdaFunction: lambda.Function;
-  public readonly batchPublisherFunction: lambda.Function;
   public readonly writeMonthlyFunction: lambda.Function;
   public readonly monthCalculatorFunction: lambda.Function;
+  public readonly monthListGeneratorFunction: lambda.Function;
   public readonly alertTopic: sns.Topic;
   public readonly monthlyWorkflowStateMachine: sfn.StateMachine;
+  public readonly backfillStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props?: HlsBatchStackProps) {
     super(scope, id, props);
@@ -114,27 +115,6 @@ export class HlsBatchStack extends Stack {
       }),
     );
 
-    // Create the batch publisher lambda function (lightweight, no custom dependencies)
-    this.batchPublisherFunction = new lambda.Function(
-      this,
-      "BatchPublisherFunction",
-      {
-        runtime: lambdaRuntime,
-        handler: "batch_publisher.handler",
-        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
-        memorySize: 512,
-        timeout: Duration.minutes(15),
-        logRetention: logs.RetentionDays.ONE_WEEK,
-        environment: {
-          TOPIC_ARN: this.snsTopic.topicArn,
-          BUCKET_NAME: this.bucket.bucketName,
-        },
-      },
-    );
-
-    // Grant batch publisher permission to publish to SNS topic
-    this.snsTopic.grantPublish(this.batchPublisherFunction);
-
     // Create the write-monthly Lambda function
     this.writeMonthlyFunction = new lambda.Function(
       this,
@@ -171,6 +151,20 @@ export class HlsBatchStack extends Stack {
       {
         runtime: lambdaRuntime,
         handler: "month_calculator.handler",
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+        memorySize: 128,
+        timeout: Duration.seconds(30),
+        logRetention: logs.RetentionDays.ONE_WEEK,
+      },
+    );
+
+    // Create the month list generator Lambda function (lightweight, no Docker build)
+    this.monthListGeneratorFunction = new lambda.Function(
+      this,
+      "MonthListGeneratorFunction",
+      {
+        runtime: lambdaRuntime,
+        handler: "month_list_generator.handler",
         code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
         memorySize: 128,
         timeout: Duration.seconds(30),
@@ -297,6 +291,89 @@ export class HlsBatchStack extends Stack {
         logs: {
           destination: new logs.LogGroup(this, "StateMachineLogGroup", {
             logGroupName: "/aws/vendedlogs/states/hls-monthly-workflow",
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: RemovalPolicy.DESTROY,
+          }),
+          level: sfn.LogLevel.ALL,
+        },
+      },
+    );
+
+    // Parent Backfill Workflow State Machine
+    // This workflow processes multiple months in parallel with controlled concurrency
+    // WARNING: This will generate many cache-daily Lambda invocations and query CMR API heavily
+
+    // Step 1: Generate list of months to process
+    const generateMonthList = new tasks.LambdaInvoke(
+      this,
+      "GenerateMonthList",
+      {
+        lambdaFunction: this.monthListGeneratorFunction,
+        outputPath: "$.Payload",
+        comment: "Generate array of year-months for backfill",
+      },
+    );
+
+    // Step 2: Map state to process all months in parallel with controlled concurrency
+    const processAllMonths = new sfn.Map(this, "ProcessAllMonths", {
+      itemsPath: "$.months",
+      maxConcurrency: 3, // Process 3 months at a time
+      resultPath: "$.monthResults",
+      comment: "Process monthly workflow for each month in parallel",
+    });
+
+    // Invoke the monthly workflow for each month
+    const invokeMonthlyWorkflow = new tasks.StepFunctionsStartExecution(
+      this,
+      "InvokeMonthlyWorkflow",
+      {
+        stateMachine: this.monthlyWorkflowStateMachine,
+        integrationPattern: sfn.IntegrationPattern.RUN_JOB, // Wait for completion
+        input: sfn.TaskInput.fromObject({
+          "collection.$": "$.collection",
+          "yearmonth.$": "$.yearmonth",
+          "dest.$": "$.dest",
+          "version.$": "$.version", // Pass through version if present
+        }),
+        resultPath: "$.workflowResult",
+        comment: "Invoke monthly workflow for a single month",
+      },
+    );
+
+    // Add retry logic for failed months
+    invokeMonthlyWorkflow.addRetry({
+      errors: ["States.TaskFailed", "States.Timeout"],
+      interval: Duration.minutes(5),
+      maxAttempts: 2,
+      backoffRate: 2,
+    });
+
+    // Configure the Map iterator
+    processAllMonths.itemProcessor(invokeMonthlyWorkflow);
+
+    // Success state for backfill
+    const backfillSuccess = new sfn.Succeed(this, "BackfillSuccess", {
+      comment: "Backfill workflow completed successfully",
+    });
+
+    // Chain the states together
+    const backfillDefinition = generateMonthList
+      .next(processAllMonths)
+      .next(backfillSuccess);
+
+    // Create backfill state machine
+    this.backfillStateMachine = new sfn.StateMachine(
+      this,
+      "BackfillStateMachine",
+      {
+        definitionBody: sfn.DefinitionBody.fromChainable(backfillDefinition),
+        timeout: Duration.hours(48), // Allow up to 48 hours for large backfills
+        comment:
+          "Orchestrates historical backfill by processing multiple months in parallel",
+        tracingEnabled: true,
+        logs: {
+          destination: new logs.LogGroup(this, "BackfillStateMachineLogGroup", {
+            logGroupName: "/aws/vendedlogs/states/hls-backfill-workflow",
             retention: logs.RetentionDays.ONE_WEEK,
             removalPolicy: RemovalPolicy.DESTROY,
           }),
@@ -519,16 +596,6 @@ export class HlsBatchStack extends Stack {
       description: "Lambda function name for cache-daily operations",
     });
 
-    new CfnOutput(this, "BatchPublisherFunctionName", {
-      value: this.batchPublisherFunction.functionName,
-      description: "Lambda function name for batch publishing date ranges",
-    });
-
-    new CfnOutput(this, "BatchPublisherFunctionArn", {
-      value: this.batchPublisherFunction.functionArn,
-      description: "Lambda function ARN for batch publishing date ranges",
-    });
-
     new CfnOutput(this, "WriteMonthlyFunctionName", {
       value: this.writeMonthlyFunction.functionName,
       description: "Lambda function name for write-monthly operations",
@@ -575,21 +642,6 @@ export class HlsBatchStack extends Stack {
     });
 
     // Output example job submission commands
-    new CfnOutput(this, "ExampleBatchPublisherCommand", {
-      value: [
-        "aws lambda invoke",
-        `--function-name ${this.batchPublisherFunction.functionName}`,
-        "--payload '",
-        JSON.stringify({
-          collection: "HLSL30",
-          start_date: "2024-01-01",
-          end_date: "2024-01-31",
-        }),
-        "' response.json",
-      ].join(" \\\n  "),
-      description: "Example command to invoke batch publisher for a date range",
-    });
-
     new CfnOutput(this, "ExampleWriteMonthlyLambdaCommand", {
       value: [
         "aws lambda invoke",
@@ -632,6 +684,48 @@ export class HlsBatchStack extends Stack {
         "'",
       ].join(" \\\n  "),
       description: "Example commands to test Step Functions workflow",
+    });
+
+    new CfnOutput(this, "BackfillStateMachineArn", {
+      value: this.backfillStateMachine.stateMachineArn,
+      description: "Step Functions state machine ARN for backfill workflow",
+    });
+
+    new CfnOutput(this, "MonthListGeneratorFunctionName", {
+      value: this.monthListGeneratorFunction.functionName,
+      description: "Lambda function name for month list generator",
+    });
+
+    new CfnOutput(this, "ExampleBackfillCommand", {
+      value: [
+        "# WARNING: This will query CMR API heavily!",
+        "# Backfill all HLSL30 history (2013-2024):",
+        "aws stepfunctions start-execution",
+        `--state-machine-arn ${this.backfillStateMachine.stateMachineArn}`,
+        '--name "backfill-hlsl30-$(date +%Y%m%d-%H%M%S)"',
+        "--input '",
+        JSON.stringify({
+          collection: "HLSL30",
+          dest: `s3://${this.bucket.bucketName}`,
+        }),
+        "'",
+        "",
+        "# Backfill specific date range with version:",
+        "aws stepfunctions start-execution",
+        `--state-machine-arn ${this.backfillStateMachine.stateMachineArn}`,
+        '--name "backfill-hlsl30-2020s-$(date +%Y%m%d-%H%M%S)"',
+        "--input '",
+        JSON.stringify({
+          collection: "HLSL30",
+          dest: `s3://${this.bucket.bucketName}`,
+          start_date: "2020-01-01",
+          end_date: "2024-12-01",
+          version: "v0.1.0",
+        }),
+        "'",
+      ].join(" \\\n  "),
+      description:
+        "Example commands to run backfill workflow (processes multiple months in parallel)",
     });
 
     // Add tags

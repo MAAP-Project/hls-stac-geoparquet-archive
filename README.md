@@ -1,6 +1,6 @@
 # HLS STAC Parquet
 
-Query NASA's CMR for HLS (Harmonized Landsat Sentinel-2) satellite data and cache STAC items as GeoParquet files. Supports both local processing and AWS Batch deployment.
+Query NASA's CMR for HLS (Harmonized Landsat Sentinel-2) satellite data and cache STAC items as GeoParquet files. Supports both local processing and AWS Lambda + Step Functions deployment.
 
 ## Development
 
@@ -65,10 +65,11 @@ Deploy scalable processing infrastructure with AWS CDK:
 
 **Serverless Lambda + Step Functions:**
 - **Cache Daily Lambda**: Lightweight CMR queries (1024 MB memory, 300s timeout, max 4 concurrent)
-- **Write Monthly Lambda**: Write monthly GeoParquet files (8192 MB memory, 15min timeout, max 2 concurrent)
+- **Write Monthly Lambda**: Write monthly GeoParquet files (8192 MB memory, 15min timeout, no concurrency limit)
 - **Month Calculator Lambda**: Generate dates array for Step Functions (128 MB memory, 30s timeout)
-- **Batch Publisher Lambda**: Publish cache-daily messages for historical backfills (512 MB memory, 15min timeout)
-- **Step Functions State Machine**: Orchestrates monthly workflow (cache-daily → write-monthly)
+- **Month List Generator Lambda**: Generate month list for backfill workflow (128 MB memory, 30s timeout)
+- **Monthly Workflow State Machine**: Orchestrates single month processing (cache-daily → write-monthly)
+- **Backfill Workflow State Machine**: Orchestrates multi-month historical backfill (max 3 months in parallel)
 - **EventBridge Rules**: Automated monthly trigger on 15th of each month (disabled by default)
 - **SNS + SQS + DLQ**: Message queue for cache-daily operations with dead letter queue for failures
 - **CloudWatch Alarms**: Monitor Lambda errors, throttles, and Step Functions failures
@@ -194,59 +195,85 @@ for day in {01..31}; do
 done
 ```
 
-#### Historical Backfills (Batch Publisher Lambda)
+#### Historical Backfills (Backfill Workflow)
 
-Use the batch publisher Lambda function to rebuild the historical archive from scratch. This publishes cache-daily messages for all dates in a range:
+> **WARNING:** The backfill workflow will query NASA's CMR API very heavily. It processes multiple months in parallel, with each month making ~30 CMR requests. Use responsibly and consider rate limiting for large historical backfills.
 
-**Batch Publisher Parameters:**
-- `collection`: Required. Either "HLSL30" or "HLSS30"
-- `start_date`: Optional. ISO format date (YYYY-MM-DD). Defaults to collection origin date (HLSL30: 2013-04-11, HLSS30: 2015-11-28)
-- `end_date`: Optional. ISO format date (YYYY-MM-DD). Defaults to yesterday
-- `dest`: Optional. S3 path like "s3://bucket/path" (defaults to stack's S3 bucket)
-- `bounding_box`: Optional. Array of [min_lon, min_lat, max_lon, max_lat]
-- `protocol`: Optional. Either "s3" or "https" (default: "s3")
-- `skip_existing`: Optional. Boolean (default: true)
+The backfill workflow is a parent Step Functions state machine that orchestrates the complete historical rebuild:
 
-**Message Format:**
-- `collection`: Required. Either "HLSL30" or "HLSS30"
-- `date`: Required. ISO format date (YYYY-MM-DD)
-- `dest`: Optional. S3 path like "s3://bucket/path" (defaults to stack's S3 bucket)
-- `bounding_box`: Optional. Array of [min_lon, min_lat, max_lon, max_lat]
-- `protocol`: Optional. Either "s3" or "https" (default: "s3")
-- `skip_existing`: Optional. Boolean (default: true)
+1. **Generate month list**: Calculate all year-months to process for a date range
+2. **Process months in parallel**: Invoke the monthly workflow for each month (max 3 concurrent)
+3. **Each monthly workflow**: Cache all days (max 4 concurrent) → Write monthly GeoParquet
+
+**Advantages over manual batch processing:**
+- Infrastructure-managed, no long-running scripts
+- Built-in concurrency control to protect upstream API
+- Automatic retries and error handling
+- Progress tracking in Step Functions console
+- Can process entire collection history in one command
+
+**Input Parameters:**
+
+- **`collection`** (required): Either `"HLSL30"` or `"HLSS30"`
+- **`dest`** (required): S3 destination path (e.g., `"s3://bucket-name"`)
+- **`start_date`** (optional): ISO format date (YYYY-MM-DD). Defaults to collection origin date (HLSL30: 2013-04-01, HLSS30: 2015-11-01)
+- **`end_date`** (optional): ISO format date (YYYY-MM-DD). Defaults to last complete month
+- **`version`** (optional): Version string for output path (e.g., `"v0.1.0"`)
+
+**Running a Backfill:**
 
 ```bash
-# Get the batch publisher function name
-BATCH_PUBLISHER_FUNCTION=$(aws cloudformation describe-stacks \
+# Get the backfill state machine ARN
+BACKFILL_STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
   --stack-name HlsBatchStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`BatchPublisherFunctionName`].OutputValue' \
+  --query 'Stacks[0].Outputs[?OutputKey==`BackfillStateMachineArn`].OutputValue' \
   --output text)
 
-# Backfill entire collection history (HLSL30: 2013-04-11 to yesterday)
-aws lambda invoke \
-  --function-name "$BATCH_PUBLISHER_FUNCTION" \
-  --payload '{"collection": "HLSL30"}' \
-  response.json
+# Backfill entire HLSL30 history (2013-04 to present)
+# WARNING: This will make ~50,000 CMR API requests over several hours
+aws stepfunctions start-execution \
+  --state-machine-arn "$BACKFILL_STATE_MACHINE_ARN" \
+  --name "backfill-hlsl30-full-$(date +%Y%m%d-%H%M%S)" \
+  --input '{"collection": "HLSL30", "dest": "s3://your-bucket"}'
 
-# Backfill specific date range
-aws lambda invoke \
-  --function-name "$BATCH_PUBLISHER_FUNCTION" \
-  --payload '{"collection": "HLSS30", "start_date": "2024-01-01", "end_date": "2024-12-31"}' \
-  response.json
+# Backfill specific date range (2020-2024)
+aws stepfunctions start-execution \
+  --state-machine-arn "$BACKFILL_STATE_MACHINE_ARN" \
+  --name "backfill-hlsl30-2020s-$(date +%Y%m%d-%H%M%S)" \
+  --input '{
+    "collection": "HLSL30",
+    "dest": "s3://your-bucket",
+    "start_date": "2020-01-01",
+    "end_date": "2024-12-01",
+    "version": "v0.1.0"
+  }'
 
-# View logs
-aws logs tail "/aws/lambda/$BATCH_PUBLISHER_FUNCTION" --follow
+# Monitor execution progress
+EXECUTION_ARN=$(aws stepfunctions list-executions \
+  --state-machine-arn "$BACKFILL_STATE_MACHINE_ARN" \
+  --max-results 1 \
+  --query 'executions[0].executionArn' \
+  --output text)
+
+aws stepfunctions describe-execution --execution-arn "$EXECUTION_ARN"
+
+# View backfill workflow logs
+aws logs tail /aws/vendedlogs/states/hls-backfill-workflow --follow
 ```
 
-**After cache-daily completes, process monthly GeoParquet files:**
+**Concurrency Settings:**
+- **Backfill workflow**: Processes 3 months concurrently
+- **Monthly workflow**: Processes 4 days concurrently per month
+- **Total concurrent CMR requests**: ~12 (3 months × 4 days)
+- **write-monthly Lambda**: No concurrency limit (processes as many months as needed)
 
-You can either:
-1. Use Step Functions to process each month (recommended)
-2. Invoke write-monthly Lambda directly for each month
+#### Manual Single-Month Processing
 
-#### Write Monthly GeoParquet Files (Lambda)
+For ad-hoc processing of individual months, you can use either the monthly Step Functions workflow or invoke the write-monthly Lambda directly.
 
 **Option 1: Via Step Functions (Recommended)**
+
+Use this to process a single month including cache-daily and write-monthly:
 
 ```bash
 # Process a specific month using Step Functions
@@ -258,13 +285,13 @@ STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
 # This will cache all days in November 2024 and write the monthly file
 aws stepfunctions start-execution \
   --state-machine-arn "$STATE_MACHINE_ARN" \
-  --name "backfill-2024-11-$(date +%Y%m%d-%H%M%S)" \
+  --name "manual-2024-11-$(date +%Y%m%d-%H%M%S)" \
   --input '{"collection": "HLSL30", "dest": "s3://your-bucket", "yearmonth": "2024-11-01"}'
 ```
 
-**Option 2: Direct Lambda Invocation**
+**Option 2: Direct write-monthly Lambda Invocation**
 
-For cases where cache-daily is already complete and you just need to write the parquet file:
+Use this only when cache-daily is already complete and you just need to write the parquet file:
 
 ```bash
 # Get the write-monthly Lambda function name
