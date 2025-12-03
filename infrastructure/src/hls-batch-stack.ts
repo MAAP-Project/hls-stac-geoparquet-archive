@@ -699,7 +699,7 @@ export class HlsBatchStack extends Stack {
     new CfnOutput(this, "ExampleBackfillCommand", {
       value: [
         "# WARNING: This will query CMR API heavily!",
-        "# Backfill all HLSL30 history (2013-2024):",
+        "# Backfill all HLSL30 history (2013-present):",
         "aws stepfunctions start-execution",
         `--state-machine-arn ${this.backfillStateMachine.stateMachineArn}`,
         '--name "backfill-hlsl30-$(date +%Y%m%d-%H%M%S)"',
