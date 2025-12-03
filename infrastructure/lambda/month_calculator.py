@@ -14,7 +14,7 @@ def handler(event, context):
     Input event format:
     {
         "collection": "HLSL30" or "HLSS30",
-        "dest": "s3://bucket/path",  # optional
+        "dest": "s3://bucket/path",  # optional, for GeoParquet output
         "yearmonth": "2024-11-01",  # optional, specific month to process (YYYY-MM-DD)
         "version": "v0.1.0",  # optional, version string for output path
         "time": "2024-12-15T10:00:00Z"  # optional, from EventBridge (ignored if yearmonth provided)
@@ -24,30 +24,30 @@ def handler(event, context):
     {
         "collection": "HLSL30",
         "yearMonth": "2024-11-01",
-        "dest": "s3://bucket",
+        "dest": "s3://bucket",  # for write-monthly GeoParquet output
         "version": "v0.1.0",  # optional, only included if provided in input
         "dates": [
             {
                 "date": "2024-11-01",
                 "collection": "HLSL30",
-                "dest": "s3://bucket",
                 "skip_existing": true
             },
             {
                 "date": "2024-11-02",
                 "collection": "HLSL30",
-                "dest": "s3://bucket",
                 "skip_existing": true
             },
             ...
             {
                 "date": "2024-11-30",
                 "collection": "HLSL30",
-                "dest": "s3://bucket",
                 "skip_existing": true
             }
         ]
     }
+
+    Note: cache-daily tasks read from and write to stack bucket (BUCKET_NAME env var)
+          write-monthly reads from stack bucket, writes to dest (or stack bucket if not provided)
 
     Returns:
         dict: Response with collection, yearMonth, dest, and dates array
@@ -87,6 +87,7 @@ def handler(event, context):
     days_in_month = monthrange(year, month)[1]
 
     # Generate array of date objects for Step Functions Map state
+    # Note: cache-daily no longer needs dest (uses BUCKET_NAME env var)
     dates = []
     for day in range(1, days_in_month + 1):
         date_obj = first_of_month.replace(day=day)
@@ -94,7 +95,6 @@ def handler(event, context):
             {
                 "date": date_obj.strftime("%Y-%m-%d"),
                 "collection": collection,
-                "dest": dest,
                 "skip_existing": True,  # Always skip existing for automated runs
             }
         )

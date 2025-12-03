@@ -1,7 +1,7 @@
 {
-  "name": "cdk-hls-batch",
+  "name": "hls-stac-geoparquet-archive",
   "version": "1.0.0",
-  "description": "AWS CDK app for HLS STAC parquet processing with AWS Batch",
+  "description": "AWS CDK app for generating a STAC Geoparquet archive of HLS granules",
   "main": "lib/app.js",
   "scripts": {
     "build": "tsc",
@@ -28,4 +28,3 @@
     "constructs": "^10.0.0"
   }
 }
-

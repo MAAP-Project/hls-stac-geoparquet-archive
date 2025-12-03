@@ -11,12 +11,9 @@ import {
   aws_events as events,
   aws_events_targets as targets,
   aws_lambda as lambda,
-  aws_lambda_event_sources as lambdaEventSources,
   aws_logs as logs,
   aws_s3 as s3,
   aws_sns as sns,
-  aws_sns_subscriptions as snsSubscriptions,
-  aws_sqs as sqs,
   aws_stepfunctions as sfn,
   aws_stepfunctions_tasks as tasks,
 } from "aws-cdk-lib";
@@ -25,17 +22,27 @@ import * as path from "path";
 
 export interface HlsBatchStackProps extends StackProps {
   /**
-   * S3 bucket name for storing parquet data
-   * If not provided, a bucket will be created
+   * S3 bucket name for storing STAC JSON links
    */
-  bucketName?: string;
+  bucketName: string;
+
+  /**
+   * List of S3 bucket names that the write-monthly Lambda can write to.
+   * For same-account buckets, permissions are granted automatically.
+   * For cross-account buckets, you must also add a bucket policy on the
+   * destination bucket granting write permissions to the Lambda's execution role.
+   * See stack output "WriteMonthlyFunctionRoleArn" for the role ARN to use.
+   */
+  allowedDestinationBuckets?: string[];
+
+  /**
+   * Version string for pipeline output files.
+   */
+  dataVersion: string;
 }
 
-export class HlsBatchStack extends Stack {
-  public readonly bucket: s3.Bucket;
-  public readonly lambdaQueue: sqs.Queue;
-  public readonly deadLetterQueue: sqs.Queue;
-  public readonly snsTopic: sns.Topic;
+export class HlsStacGeoparquetStack extends Stack {
+  public readonly bucket: s3.IBucket;
   public readonly cacheDailyFunction: lambda.Function;
   public readonly writeMonthlyFunction: lambda.Function;
   public readonly monthCalculatorFunction: lambda.Function;
@@ -44,40 +51,13 @@ export class HlsBatchStack extends Stack {
   public readonly monthlyWorkflowStateMachine: sfn.StateMachine;
   public readonly backfillStateMachine: sfn.StateMachine;
 
-  constructor(scope: Construct, id: string, props?: HlsBatchStackProps) {
+  constructor(scope: Construct, id: string, props: HlsBatchStackProps) {
     super(scope, id, props);
 
-    // Create S3 bucket for storing parquet data
-    this.bucket = new s3.Bucket(this, "HlsParquetBucket", {
-      bucketName: props?.bucketName,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
-
-    // Create dead letter queue
-    this.deadLetterQueue = new sqs.Queue(this, "DeadLetterQueue", {
-      retentionPeriod: Duration.days(14),
-    });
-
-    // Create main queue
-    this.lambdaQueue = new sqs.Queue(this, "Queue", {
-      visibilityTimeout: Duration.seconds(300),
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
-      deadLetterQueue: {
-        maxReceiveCount: 2,
-        queue: this.deadLetterQueue,
-      },
-    });
-
-    // Create SNS topic
-    this.snsTopic = new sns.Topic(this, "Topic", {
-      displayName: `${id}-StacLoaderTopic`,
-    });
-
-    // Subscribe the queue to the topic
-    this.snsTopic.addSubscription(
-      new snsSubscriptions.SqsSubscription(this.lambdaQueue),
+    this.bucket = s3.Bucket.fromBucketName(
+      this,
+      "HlsStacGeoparquetBucket",
+      props?.bucketName,
     );
 
     // Create the lambda function
@@ -96,7 +76,10 @@ export class HlsBatchStack extends Stack {
       memorySize: 1024,
       timeout: Duration.seconds(300),
       reservedConcurrentExecutions: maxConcurrency,
-      logRetention: logs.RetentionDays.ONE_WEEK,
+      logGroup: new logs.LogGroup(this, "CacheDailyLogGroup", {
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: RemovalPolicy.DESTROY,
+      }),
       environment: {
         BUCKET_NAME: this.bucket.bucketName,
       },
@@ -104,16 +87,6 @@ export class HlsBatchStack extends Stack {
 
     // Grant Lambda function permissions to read/write to S3 bucket
     this.bucket.grantReadWrite(this.cacheDailyFunction);
-
-    // Add SQS event source to the lambda
-    this.cacheDailyFunction.addEventSource(
-      new lambdaEventSources.SqsEventSource(this.lambdaQueue, {
-        batchSize: 20,
-        maxBatchingWindow: Duration.minutes(1),
-        maxConcurrency: maxConcurrency,
-        reportBatchItemFailures: true,
-      }),
-    );
 
     // Create the write-monthly Lambda function
     this.writeMonthlyFunction = new lambda.Function(
@@ -123,7 +96,7 @@ export class HlsBatchStack extends Stack {
         runtime: lambdaRuntime,
         handler: "hls_stac_parquet.write_handler.handler",
         code: lambda.Code.fromDockerBuild(path.join(__dirname, "../../"), {
-          file: "infrastructure/Dockerfile.lambda",
+          file: "Dockerfile",
           platform: "linux/amd64",
           buildArgs: {
             PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
@@ -132,17 +105,32 @@ export class HlsBatchStack extends Stack {
         memorySize: 8192,
         timeout: Duration.minutes(15),
         ephemeralStorageSize: Size.gibibytes(10),
-        logRetention: logs.RetentionDays.ONE_WEEK,
+        logGroup: new logs.LogGroup(this, "WriteMonthlyLogGroup", {
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: RemovalPolicy.DESTROY,
+        }),
         environment: {
           BUCKET_NAME: this.bucket.bucketName,
           EARTHDATA_USERNAME: process.env.EARTHDATA_USERNAME || "",
           EARTHDATA_PASSWORD: process.env.EARTHDATA_PASSWORD || "",
+          VERSION: props.dataVersion,
         },
       },
     );
 
-    // Grant write-monthly Lambda permissions to read/write to S3 bucket
+    // Grant write-monthly Lambda permissions to read/write to stack bucket
     this.bucket.grantReadWrite(this.writeMonthlyFunction);
+
+    // Grant write permissions to allowed destination buckets
+    if (props.allowedDestinationBuckets) {
+      props.allowedDestinationBuckets.forEach((bucketName) => {
+        s3.Bucket.fromBucketName(
+          this,
+          `DestBucket-${bucketName}`,
+          bucketName,
+        ).grantReadWrite(this.writeMonthlyFunction);
+      });
+    }
 
     // Create the month calculator Lambda function (lightweight, no Docker build)
     this.monthCalculatorFunction = new lambda.Function(
@@ -154,7 +142,10 @@ export class HlsBatchStack extends Stack {
         code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
         memorySize: 128,
         timeout: Duration.seconds(30),
-        logRetention: logs.RetentionDays.ONE_WEEK,
+        logGroup: new logs.LogGroup(this, "MonthCalculatorLogGroup", {
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: RemovalPolicy.DESTROY,
+        }),
       },
     );
 
@@ -168,7 +159,10 @@ export class HlsBatchStack extends Stack {
         code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
         memorySize: 128,
         timeout: Duration.seconds(30),
-        logRetention: logs.RetentionDays.ONE_WEEK,
+        logGroup: new logs.LogGroup(this, "MonthListGeneratorLogGroup", {
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: RemovalPolicy.DESTROY,
+        }),
       },
     );
 
@@ -199,23 +193,13 @@ export class HlsBatchStack extends Stack {
     });
 
     // Cache-daily Lambda invocation for each date
-    // Format the payload to match the existing SQS event structure
+    // Note: STAC JSON links are always written to the stack's bucket (BUCKET_NAME env var)
     const cacheDailyTask = new tasks.LambdaInvoke(this, "CacheDailyTask", {
       lambdaFunction: this.cacheDailyFunction,
       payload: sfn.TaskInput.fromObject({
-        Records: [
-          {
-            "messageId.$": "$$.Execution.Id",
-            body: {
-              Message: {
-                "date.$": "$.date",
-                "collection.$": "$.collection",
-                "dest.$": "$.dest",
-                "skip_existing.$": "$.skip_existing",
-              },
-            },
-          },
-        ],
+        "date.$": "$.date",
+        "collection.$": "$.collection",
+        "skip_existing.$": "$.skip_existing",
       }),
       resultPath: "$.result",
       comment: "Invoke cache-daily Lambda for a single date",
@@ -233,13 +217,14 @@ export class HlsBatchStack extends Stack {
     cacheAllDays.itemProcessor(cacheDailyTask);
 
     // Step 3: Write monthly parquet
-    // Build payload dynamically to conditionally include version
+    // Note: STAC JSON links are read from stack bucket (BUCKET_NAME env var)
+    // dest: configurable destination for writing GeoParquet files
     const writeMonthly = new tasks.LambdaInvoke(this, "WriteMonthly", {
       lambdaFunction: this.writeMonthlyFunction,
       payload: sfn.TaskInput.fromObject({
         "collection.$": "$.collection",
         "yearmonth.$": "$.yearMonth",
-        "dest.$": "$.dest",
+        "dest.$": "$.dest", // Optional: defaults to stack bucket if not provided
         "version.$": "$.version", // Pass through version if present
         require_complete_links: true,
         skip_existing: true,
@@ -290,7 +275,8 @@ export class HlsBatchStack extends Stack {
         tracingEnabled: true,
         logs: {
           destination: new logs.LogGroup(this, "StateMachineLogGroup", {
-            logGroupName: "/aws/vendedlogs/states/hls-monthly-workflow",
+            logGroupName:
+              "/aws/vendedlogs/states/hls-stac-geoparquet-monthly-workflow",
             retention: logs.RetentionDays.ONE_WEEK,
             removalPolicy: RemovalPolicy.DESTROY,
           }),
@@ -373,7 +359,8 @@ export class HlsBatchStack extends Stack {
         tracingEnabled: true,
         logs: {
           destination: new logs.LogGroup(this, "BackfillStateMachineLogGroup", {
-            logGroupName: "/aws/vendedlogs/states/hls-backfill-workflow",
+            logGroupName:
+              "/aws/vendedlogs/states/hls-stac-geoparquet-backfill-workflow",
             retention: logs.RetentionDays.ONE_WEEK,
             removalPolicy: RemovalPolicy.DESTROY,
           }),
@@ -586,11 +573,6 @@ export class HlsBatchStack extends Stack {
       description: "S3 bucket ARN for storing HLS parquet data",
     });
 
-    new CfnOutput(this, "TopicArn", {
-      value: this.snsTopic.topicArn,
-      description: "SNS topic ARN for triggering cache-daily Lambda function",
-    });
-
     new CfnOutput(this, "LambdaFunctionName", {
       value: this.cacheDailyFunction.functionName,
       description: "Lambda function name for cache-daily operations",
@@ -604,6 +586,12 @@ export class HlsBatchStack extends Stack {
     new CfnOutput(this, "WriteMonthlyFunctionArn", {
       value: this.writeMonthlyFunction.functionArn,
       description: "Lambda function ARN for write-monthly operations",
+    });
+
+    new CfnOutput(this, "WriteMonthlyFunctionRoleArn", {
+      value: this.writeMonthlyFunction.role!.roleArn,
+      description:
+        "Lambda execution role ARN - use this in cross-account bucket policies",
     });
 
     new CfnOutput(this, "MonthCalculatorFunctionName", {
@@ -629,16 +617,6 @@ export class HlsBatchStack extends Stack {
     new CfnOutput(this, "MonthlyRuleHLSS30", {
       value: hlss30MonthlyRule.ruleName,
       description: "EventBridge rule name for HLSS30 monthly trigger",
-    });
-
-    new CfnOutput(this, "QueueUrl", {
-      value: this.lambdaQueue.queueUrl,
-      description: "SQS queue URL for cache-daily Lambda function",
-    });
-
-    new CfnOutput(this, "DeadLetterQueueUrl", {
-      value: this.deadLetterQueue.queueUrl,
-      description: "Dead letter queue URL for failed cache-daily messages",
     });
 
     // Output example job submission commands
@@ -726,6 +704,29 @@ export class HlsBatchStack extends Stack {
       ].join(" \\\n  "),
       description:
         "Example commands to run backfill workflow (processes multiple months in parallel)",
+    });
+
+    new CfnOutput(this, "CrossAccountBucketPolicyExample", {
+      value: JSON.stringify(
+        {
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Sid: "AllowHLSStackWriteAccess",
+              Effect: "Allow",
+              Principal: {
+                AWS: this.writeMonthlyFunction.role!.roleArn,
+              },
+              Action: ["s3:PutObject", "s3:PutObjectAcl", "s3:GetObject"],
+              Resource: "arn:aws:s3:::YOUR-CROSS-ACCOUNT-BUCKET/*",
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      description:
+        "Example bucket policy to add to cross-account destination buckets",
     });
 
     // Add tags

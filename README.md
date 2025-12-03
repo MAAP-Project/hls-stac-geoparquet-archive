@@ -105,7 +105,7 @@ The Step Functions state machine automatically runs on the 15th of each month (w
 ```bash
 # Get the state machine ARN
 STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`MonthlyWorkflowStateMachineArn`].OutputValue' \
   --output text)
 
@@ -142,12 +142,12 @@ aws stepfunctions describe-execution --execution-arn "$EXECUTION_ARN"
 ```bash
 # Enable EventBridge rules (one per collection)
 HLSL30_RULE=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`MonthlyRuleHLSL30`].OutputValue' \
   --output text)
 
 HLSS30_RULE=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`MonthlyRuleHLSS30`].OutputValue' \
   --output text)
 
@@ -164,7 +164,7 @@ Publish messages to SNS to trigger the Lambda function. Get the SNS topic ARN fr
 ```bash
 # Get the SNS topic ARN
 SNS_TOPIC_ARN=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`TopicArn`].OutputValue' \
   --output text)
 
@@ -225,7 +225,7 @@ The backfill workflow is a parent Step Functions state machine that orchestrates
 ```bash
 # Get the backfill state machine ARN
 BACKFILL_STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`BackfillStateMachineArn`].OutputValue' \
   --output text)
 
@@ -278,7 +278,7 @@ Use this to process a single month including cache-daily and write-monthly:
 ```bash
 # Process a specific month using Step Functions
 STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`MonthlyWorkflowStateMachineArn`].OutputValue' \
   --output text)
 
@@ -296,7 +296,7 @@ Use this only when cache-daily is already complete and you just need to write th
 ```bash
 # Get the write-monthly Lambda function name
 WRITE_MONTHLY_FUNCTION=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`WriteMonthlyFunctionName`].OutputValue' \
   --output text)
 
@@ -329,7 +329,7 @@ View execution status and logs:
 ```bash
 # Get state machine ARN
 STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`MonthlyWorkflowStateMachineArn`].OutputValue' \
   --output text)
 
@@ -358,14 +358,14 @@ View Lambda logs:
 ```bash
 # Cache-daily Lambda
 CACHE_DAILY_FUNCTION=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`LambdaFunctionName`].OutputValue' \
   --output text)
 aws logs tail "/aws/lambda/$CACHE_DAILY_FUNCTION" --follow
 
 # Write-monthly Lambda
 WRITE_MONTHLY_FUNCTION=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`WriteMonthlyFunctionName`].OutputValue' \
   --output text)
 aws logs tail "/aws/lambda/$WRITE_MONTHLY_FUNCTION" --follow
@@ -382,12 +382,12 @@ Check SQS queue depth:
 ```bash
 # Get queue URLs
 QUEUE_URL=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`QueueUrl`].OutputValue' \
   --output text)
 
 DLQ_URL=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`DeadLetterQueueUrl`].OutputValue' \
   --output text)
 
@@ -409,7 +409,7 @@ Subscribe to alerts for failures:
 ```bash
 # Get alert topic ARN
 ALERT_TOPIC_ARN=$(aws cloudformation describe-stacks \
-  --stack-name HlsBatchStack \
+  --stack-name HlsStacGeoparquetArchive \
   --query 'Stacks[0].Outputs[?OutputKey==`AlertTopicArn`].OutputValue' \
   --output text)
 
@@ -420,7 +420,7 @@ aws sns subscribe \
   --notification-endpoint your-email@example.com
 
 # View alarm status
-aws cloudwatch describe-alarms --alarm-name-prefix HlsBatchStack
+aws cloudwatch describe-alarms --alarm-name-prefix HlsStacGeoparquetArchive
 ```
 
 ### Cleanup

@@ -7,16 +7,11 @@ import os
 from datetime import datetime
 from typing import Any
 
-from hls_stac_parquet import __version__
 from hls_stac_parquet.cmr_api import HlsCollection
 from hls_stac_parquet.write import write_monthly_stac_geoparquet
 
-# Configure logger for Lambda environment
 logger = logging.getLogger(__name__)
-# Set level directly on logger since Lambda pre-configures root logger
 logger.setLevel(logging.INFO)
-
-# Also set level for imported module loggers to see their output
 logging.getLogger("hls_stac_parquet").setLevel(logging.INFO)
 
 
@@ -32,17 +27,19 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         "collection": "HLSL30" or "HLSS30",
         "yearmonth": "YYYY-MM-DD",  # Day is ignored, only year and month used
         "dest": "s3://bucket/path",  # optional, defaults to BUCKET_NAME env var
-        "version": "0.2.0",  # optional, defaults to package version
+        "version": "v2",  # optional, defaults to VERSION env var
         "require_complete_links": true,  # optional, default true
         "skip_existing": true,  # optional, default true
         "batch_size": 1000  # optional, default 1000
     }
 
     Environment Variables:
-    - BUCKET_NAME: S3 bucket name (used if "dest" not provided in event)
+    - BUCKET_NAME: S3 bucket name for reading STAC JSON links (source) and
+                   default destination for GeoParquet files (if dest not provided)
+    - VERSION: Default version string for pipeline output (required)
 
     Returns:
-        dict: Response with status, collection, yearmonth, and dest
+        dict: Response with status, collection, yearmonth, source, and dest
     """
     logger.info(f"Write-monthly Lambda invoked with event: {json.dumps(event)}")
 
@@ -59,14 +56,22 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             raise ValueError("Missing required parameter: 'yearmonth'")
         logger.info(f"Year-month: {yearmonth_str}")
 
-        # Get dest from event or environment variable
+        # Get source from environment variable only (always use stack bucket)
+        bucket_name = os.environ.get("BUCKET_NAME")
+        if not bucket_name:
+            raise ValueError("BUCKET_NAME environment variable not set")
+        source = f"s3://{bucket_name}"
+        logger.info(f"Using stack bucket for reading STAC JSON links: {source}")
+
+        # Get default version from environment variable
+        default_version = os.environ.get("VERSION")
+        if not default_version:
+            raise ValueError("VERSION environment variable not set")
+        logger.info(f"Default pipeline version from environment: {default_version}")
+
+        # Get dest from event or default to BUCKET_NAME env var
         dest = event.get("dest")
         if not dest:
-            bucket_name = os.environ.get("BUCKET_NAME")
-            if not bucket_name:
-                raise ValueError(
-                    "Missing 'dest' parameter in event and BUCKET_NAME environment variable not set"
-                )
             dest = f"s3://{bucket_name}"
             logger.info(f"Using default destination from BUCKET_NAME env var: {dest}")
         else:
@@ -94,7 +99,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
 
         # Extract optional parameters
         logger.info("Processing optional parameters")
-        version = event.get("version", __version__)
+        version = event.get("version", default_version)
         logger.info(f"Version: {version}")
 
         require_complete_links = event.get("require_complete_links", True)
@@ -116,6 +121,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             write_monthly_stac_geoparquet(
                 collection=collection,
                 yearmonth=yearmonth,
+                source=source,
                 dest=dest,
                 version=version,
                 require_complete_links=require_complete_links,
@@ -132,6 +138,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             "status": "success",
             "collection": collection.value,
             "yearmonth": yearmonth_str,
+            "source": source,
             "dest": dest,
         }
 
@@ -140,11 +147,6 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             f"Write-monthly operation failed: {str(e)}",
             exc_info=True,
         )
-        # Return error response
-        return {
-            "statusCode": 500,
-            "status": "failed",
-            "error": str(e),
-            "collection": event.get("collection"),
-            "yearmonth": event.get("yearmonth"),
-        }
+        # Re-raise the exception so Step Functions sees it as a failure
+        # This allows Step Functions retry logic to work properly
+        raise
