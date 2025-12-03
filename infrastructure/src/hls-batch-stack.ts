@@ -36,7 +36,7 @@ export class HlsBatchStack extends Stack {
   public readonly lambdaQueue: sqs.Queue;
   public readonly deadLetterQueue: sqs.Queue;
   public readonly snsTopic: sns.Topic;
-  public readonly lambdaFunction: lambda.Function;
+  public readonly cacheDailyFunction: lambda.Function;
   public readonly writeMonthlyFunction: lambda.Function;
   public readonly monthCalculatorFunction: lambda.Function;
   public readonly monthListGeneratorFunction: lambda.Function;
@@ -83,11 +83,11 @@ export class HlsBatchStack extends Stack {
     // Create the lambda function
     const maxConcurrency = 4;
     const lambdaRuntime = lambda.Runtime.PYTHON_3_13;
-    this.lambdaFunction = new lambda.Function(this, "Function", {
+    this.cacheDailyFunction = new lambda.Function(this, "CacheDailyFunction", {
       runtime: lambdaRuntime,
       handler: "hls_stac_parquet.handler.handler",
       code: lambda.Code.fromDockerBuild(path.join(__dirname, "../../"), {
-        file: "infrastructure/Dockerfile.lambda",
+        file: "Dockerfile",
         platform: "linux/amd64",
         buildArgs: {
           PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
@@ -103,10 +103,10 @@ export class HlsBatchStack extends Stack {
     });
 
     // Grant Lambda function permissions to read/write to S3 bucket
-    this.bucket.grantReadWrite(this.lambdaFunction);
+    this.bucket.grantReadWrite(this.cacheDailyFunction);
 
     // Add SQS event source to the lambda
-    this.lambdaFunction.addEventSource(
+    this.cacheDailyFunction.addEventSource(
       new lambdaEventSources.SqsEventSource(this.lambdaQueue, {
         batchSize: 20,
         maxBatchingWindow: Duration.minutes(1),
@@ -201,7 +201,7 @@ export class HlsBatchStack extends Stack {
     // Cache-daily Lambda invocation for each date
     // Format the payload to match the existing SQS event structure
     const cacheDailyTask = new tasks.LambdaInvoke(this, "CacheDailyTask", {
-      lambdaFunction: this.lambdaFunction,
+      lambdaFunction: this.cacheDailyFunction,
       payload: sfn.TaskInput.fromObject({
         Records: [
           {
@@ -507,7 +507,7 @@ export class HlsBatchStack extends Stack {
       this,
       "CacheDailyErrorAlarm",
       {
-        metric: this.lambdaFunction.metricErrors({
+        metric: this.cacheDailyFunction.metricErrors({
           period: Duration.minutes(5),
           statistic: "Sum",
         }),
@@ -592,7 +592,7 @@ export class HlsBatchStack extends Stack {
     });
 
     new CfnOutput(this, "LambdaFunctionName", {
-      value: this.lambdaFunction.functionName,
+      value: this.cacheDailyFunction.functionName,
       description: "Lambda function name for cache-daily operations",
     });
 
