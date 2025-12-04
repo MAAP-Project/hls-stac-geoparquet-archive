@@ -2,6 +2,9 @@
 
 Query NASA's CMR for HLS (Harmonized Landsat Sentinel-2) satellite data and cache STAC items as GeoParquet files. Supports both local processing and AWS Lambda + Step Functions deployment.
 
+The AWS Step Functions + Lambda pipeline writes a hive-partitioned parquet dataset following this pattern:
+`s3://{bucket}/{prefix}/{version}/{collection}/year={year}/month={month}/*.parquet`.
+
 ## Development
 
 ```bash
@@ -53,8 +56,8 @@ s3://bucket/data/
 │   ├── HLSL30.v2.0/2024/01/2024-01-01.json
 │   ├── HLSL30.v2.0/2024/01/2024-01-02.json
     └── ...
-└── v0.1/
-    └── HLSL30.v2.0/year=2024/month=01/HLSL30_2.0-2025-1.parquet
+└── v2/
+    └── HLSL30.v2.0/year=2024/month=01/HLSL30_2.0-2024-1.parquet
 ```
 
 ## AWS Deployment

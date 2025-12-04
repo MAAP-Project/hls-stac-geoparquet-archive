@@ -10,9 +10,8 @@ new HlsStacGeoparquetStack(app, "HlsStacGeoparquetArchive", {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION || "us-west-2",
   },
-  bucketName: "hls-stac-geoparquet",
-  allowedDestinationBuckets: ["hrodmn-scratch", "nasa-maap-data-store"],
-  defaultDestination:
-    "s3://nasa-maap-data-store/file-staging/nasa-map/hls-stac-geoparquet-archive",
+  linkBucket: "hls-stac-geoparquet",
+  destBucket: "nasa-maap-data-store",
+  destPath: "file-staging/nasa-map/hls-stac-geoparquet-archive",
   dataVersion: "v2",
 });

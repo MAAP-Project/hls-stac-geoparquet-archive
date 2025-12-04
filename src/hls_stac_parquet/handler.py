@@ -30,7 +30,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     }
 
     Environment Variables:
-    - BUCKET_NAME: S3 bucket name for storing STAC JSON links (required)
+    - DEST: S3 URI for storing STAC JSON links (required, e.g., s3://bucket-name)
 
     Returns:
         dict: Response with success status and message
@@ -50,12 +50,11 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         raise ValueError("Missing required parameter: 'date'")
     logger.info(f"Date: {date_str}")
 
-    # Get dest from environment variable only (always use stack bucket)
-    bucket_name = os.environ.get("BUCKET_NAME")
-    if not bucket_name:
-        raise ValueError("BUCKET_NAME environment variable not set")
-    dest = f"s3://{bucket_name}"
-    logger.info(f"Using stack bucket for STAC JSON links: {dest}")
+    # Get dest from DEST environment variable
+    dest = os.environ.get("DEST")
+    if not dest:
+        raise ValueError("DEST environment variable not set")
+    logger.info(f"Using DEST for STAC JSON links: {dest}")
 
     # Convert collection string to enum
     logger.info("Converting collection string to enum")

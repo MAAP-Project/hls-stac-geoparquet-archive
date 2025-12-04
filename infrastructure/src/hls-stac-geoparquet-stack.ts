@@ -24,21 +24,18 @@ export interface HlsBatchStackProps extends StackProps {
   /**
    * S3 bucket name for storing STAC JSON links
    */
-  bucketName: string;
+  linkBucket: string;
 
   /**
-   * List of S3 bucket names that the write-monthly Lambda can write to.
-   * For same-account buckets, permissions are granted automatically.
-   * For cross-account buckets, you must also add a bucket policy on the
-   * destination bucket granting write permissions to the Lambda's execution role.
-   * See stack output "WriteMonthlyFunctionRoleArn" for the role ARN to use.
+   * S3 bucket name for writing STAC Geoparquet files
    */
-  allowedDestinationBuckets?: string[];
+  destBucket: string;
 
   /**
-   * Default destination for writing the STAC Geoparquet files
+   * S3 path prefix for writing STAC Geoparquet files (optional)
+   * Example: "path/to/destination" (no leading or trailing slashes needed)
    */
-  defaultDestination: string;
+  destPath?: string;
 
   /**
    * Version string for pipeline output files.
@@ -62,7 +59,7 @@ export class HlsStacGeoparquetStack extends Stack {
     this.bucket = s3.Bucket.fromBucketName(
       this,
       "HlsStacGeoparquetBucket",
-      props?.bucketName,
+      props?.linkBucket,
     );
 
     // Create the lambda function
@@ -86,7 +83,7 @@ export class HlsStacGeoparquetStack extends Stack {
         removalPolicy: RemovalPolicy.DESTROY,
       }),
       environment: {
-        BUCKET_NAME: this.bucket.bucketName,
+        DEST: `s3://${this.bucket.bucketName}`,
       },
     });
 
@@ -94,6 +91,11 @@ export class HlsStacGeoparquetStack extends Stack {
     this.bucket.grantReadWrite(this.cacheDailyFunction);
 
     // Create the write-monthly Lambda function
+    // Construct destination S3 URI from bucket and optional path
+    const destUri = props.destPath
+      ? `s3://${props.destBucket}/${props.destPath}`
+      : `s3://${props.destBucket}`;
+
     this.writeMonthlyFunction = new lambda.Function(
       this,
       "WriteMonthlyFunction",
@@ -115,7 +117,8 @@ export class HlsStacGeoparquetStack extends Stack {
           removalPolicy: RemovalPolicy.DESTROY,
         }),
         environment: {
-          DEFAULT_DESTINATION: props.defaultDestination,
+          SOURCE: `s3://${this.bucket.bucketName}`,
+          DEST: destUri,
           EARTHDATA_USERNAME: process.env.EARTHDATA_USERNAME || "",
           EARTHDATA_PASSWORD: process.env.EARTHDATA_PASSWORD || "",
           VERSION: props.dataVersion,
@@ -126,16 +129,13 @@ export class HlsStacGeoparquetStack extends Stack {
     // Grant write-monthly Lambda permissions to read/write to stack bucket
     this.bucket.grantReadWrite(this.writeMonthlyFunction);
 
-    // Grant write permissions to allowed destination buckets
-    if (props.allowedDestinationBuckets) {
-      props.allowedDestinationBuckets.forEach((bucketName) => {
-        s3.Bucket.fromBucketName(
-          this,
-          `DestBucket-${bucketName}`,
-          bucketName,
-        ).grantReadWrite(this.writeMonthlyFunction);
-      });
-    }
+    // Grant write permissions to destination bucket
+    const destBucket = s3.Bucket.fromBucketName(
+      this,
+      "DestBucket",
+      props.destBucket,
+    );
+    destBucket.grantReadWrite(this.writeMonthlyFunction);
 
     // Create the month calculator Lambda function (lightweight, no Docker build)
     this.monthCalculatorFunction = new lambda.Function(
@@ -222,15 +222,13 @@ export class HlsStacGeoparquetStack extends Stack {
     cacheAllDays.itemProcessor(cacheDailyTask);
 
     // Step 3: Write monthly parquet
-    // Note: STAC JSON links are read from stack bucket (BUCKET_NAME env var)
-    // dest: configurable destination for writing GeoParquet files
+    // Note: STAC JSON links are read from SOURCE env var
+    // GeoParquet files are written to DEST env var
     const writeMonthly = new tasks.LambdaInvoke(this, "WriteMonthly", {
       lambdaFunction: this.writeMonthlyFunction,
       payload: sfn.TaskInput.fromObject({
         "collection.$": "$.collection",
         "yearmonth.$": "$.yearMonth",
-        "dest.$": "$.dest", // Optional: defaults to stack bucket if not provided
-        "version.$": "$.version", // Pass through version if present
         require_complete_links: true,
         skip_existing: true,
       }),
@@ -323,8 +321,6 @@ export class HlsStacGeoparquetStack extends Stack {
         input: sfn.TaskInput.fromObject({
           "collection.$": "$.collection",
           "yearmonth.$": "$.yearmonth",
-          "dest.$": "$.dest",
-          "version.$": "$.version", // Pass through version if present
         }),
         resultPath: "$.workflowResult",
         comment: "Invoke monthly workflow for a single month",
@@ -393,7 +389,6 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSL30",
-          dest: `s3://${this.bucket.bucketName}`,
           time: events.EventField.time,
         }),
       }),
@@ -417,7 +412,6 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSS30",
-          dest: `s3://${this.bucket.bucketName}`,
           time: events.EventField.time,
         }),
       }),
@@ -649,20 +643,17 @@ export class HlsStacGeoparquetStack extends Stack {
         "--input '",
         JSON.stringify({
           collection: "HLSL30",
-          dest: `s3://${this.bucket.bucketName}`,
         }),
         "'",
         "",
-        "# Process specific month with version:",
+        "# Process specific month:",
         "aws stepfunctions start-execution",
         `--state-machine-arn ${this.monthlyWorkflowStateMachine.stateMachineArn}`,
         '--name "test-2024-11-$(date +%Y%m%d-%H%M%S)"',
         "--input '",
         JSON.stringify({
           collection: "HLSL30",
-          dest: `s3://${this.bucket.bucketName}`,
           yearmonth: "2024-11-01",
-          version: "v0.1.0",
         }),
         "'",
       ].join(" \\\n  "),
@@ -689,21 +680,18 @@ export class HlsStacGeoparquetStack extends Stack {
         "--input '",
         JSON.stringify({
           collection: "HLSL30",
-          dest: `s3://${this.bucket.bucketName}`,
         }),
         "'",
         "",
-        "# Backfill specific date range with version:",
+        "# Backfill specific date range:",
         "aws stepfunctions start-execution",
         `--state-machine-arn ${this.backfillStateMachine.stateMachineArn}`,
         '--name "backfill-hlsl30-2020s-$(date +%Y%m%d-%H%M%S)"',
         "--input '",
         JSON.stringify({
           collection: "HLSL30",
-          dest: `s3://${this.bucket.bucketName}`,
           start_date: "2020-01-01",
           end_date: "2024-12-01",
-          version: "v0.1.0",
         }),
         "'",
       ].join(" \\\n  "),

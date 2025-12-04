@@ -26,17 +26,15 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     {
         "collection": "HLSL30" or "HLSS30",
         "yearmonth": "YYYY-MM-DD",  # Day is ignored, only year and month used
-        "dest": "s3://bucket/path",  # optional, defaults to BUCKET_NAME env var
-        "version": "v2",  # optional, defaults to VERSION env var
         "require_complete_links": true,  # optional, default true
         "skip_existing": true,  # optional, default true
         "batch_size": 1000  # optional, default 1000
     }
 
     Environment Variables:
-    - BUCKET_NAME: S3 bucket name for reading STAC JSON links (source) and
-                   default destination for GeoParquet files (if dest not provided)
-    - VERSION: Default version string for pipeline output (required)
+    - SOURCE: S3 URI for reading STAC JSON links (required, e.g., s3://bucket-name)
+    - DEST: S3 URI for writing GeoParquet files (required, e.g., s3://bucket-name)
+    - VERSION: Version string for pipeline output (required)
 
     Returns:
         dict: Response with status, collection, yearmonth, source, and dest
@@ -56,31 +54,23 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             raise ValueError("Missing required parameter: 'yearmonth'")
         logger.info(f"Year-month: {yearmonth_str}")
 
-        # Get source from environment variable only (always use stack bucket)
-        bucket_name = os.environ.get("BUCKET_NAME")
-        if not bucket_name:
-            raise ValueError("BUCKET_NAME environment variable not set")
-        source = f"s3://{bucket_name}"
-        logger.info(f"Using stack bucket for reading STAC JSON links: {source}")
+        # Get source from SOURCE environment variable
+        source = os.environ.get("SOURCE")
+        if not source:
+            raise ValueError("SOURCE environment variable not set")
+        logger.info(f"Using SOURCE for reading STAC JSON links: {source}")
 
-        # Get default version from environment variable
-        default_version = os.environ.get("VERSION")
-        if not default_version:
-            raise ValueError("VERSION environment variable not set")
-        logger.info(f"Default pipeline version from environment: {default_version}")
-
-        # Get dest from event or default to BUCKET_NAME env var
-        dest = event.get("dest")
-        default_dest = os.environ.get("DEFAULT_DESTINATION")
-        if not default_dest:
-            raise ValueError("DEFAULT_DESTINATION environment variable not set")
+        # Get dest from DEST environment variable
+        dest = os.environ.get("DEST")
         if not dest:
-            dest = default_dest
-            logger.info(
-                f"Using default destination from DEFAULT_DESTINATION env var: {default_dest}"
-            )
-        else:
-            logger.info(f"Using destination from event: {dest}")
+            raise ValueError("DEST environment variable not set")
+        logger.info(f"Using DEST for writing GeoParquet files: {dest}")
+
+        # Get version from environment variable
+        version = os.environ.get("VERSION")
+        if not version:
+            raise ValueError("VERSION environment variable not set")
+        logger.info(f"Pipeline version from environment: {version}")
 
         # Convert collection string to enum
         logger.info("Converting collection string to enum")
@@ -104,9 +94,6 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
 
         # Extract optional parameters
         logger.info("Processing optional parameters")
-        version = event.get("version", default_version)
-        logger.info(f"Version: {version}")
-
         require_complete_links = event.get("require_complete_links", True)
         logger.info(f"Require complete links: {require_complete_links}")
 
