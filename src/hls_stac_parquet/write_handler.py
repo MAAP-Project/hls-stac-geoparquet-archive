@@ -71,9 +71,14 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
 
         # Get dest from event or default to BUCKET_NAME env var
         dest = event.get("dest")
+        default_dest = os.environ.get("DEFAULT_DESTINATION")
+        if not default_dest:
+            raise ValueError("DEFAULT_DESTINATION environment variable not set")
         if not dest:
-            dest = f"s3://{bucket_name}"
-            logger.info(f"Using default destination from BUCKET_NAME env var: {dest}")
+            dest = default_dest
+            logger.info(
+                f"Using default destination from DEFAULT_DESTINATION env var: {default_dest}"
+            )
         else:
             logger.info(f"Using destination from event: {dest}")
 

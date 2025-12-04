@@ -12,5 +12,7 @@ new HlsStacGeoparquetStack(app, "HlsStacGeoparquetArchive", {
   },
   bucketName: "hls-stac-geoparquet",
   allowedDestinationBuckets: ["hrodmn-scratch", "nasa-maap-data-store"],
+  defaultDestination:
+    "s3://nasa-maap-data-store/file-staging/nasa-map/hls-stac-geoparquet-archive",
   dataVersion: "v2",
 });

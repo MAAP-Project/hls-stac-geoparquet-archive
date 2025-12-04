@@ -36,6 +36,11 @@ export interface HlsBatchStackProps extends StackProps {
   allowedDestinationBuckets?: string[];
 
   /**
+   * Default destination for writing the STAC Geoparquet files
+   */
+  defaultDestination: string;
+
+  /**
    * Version string for pipeline output files.
    */
   dataVersion: string;
@@ -110,7 +115,7 @@ export class HlsStacGeoparquetStack extends Stack {
           removalPolicy: RemovalPolicy.DESTROY,
         }),
         environment: {
-          BUCKET_NAME: this.bucket.bucketName,
+          DEFAULT_DESTINATION: props.defaultDestination,
           EARTHDATA_USERNAME: process.env.EARTHDATA_USERNAME || "",
           EARTHDATA_PASSWORD: process.env.EARTHDATA_PASSWORD || "",
           VERSION: props.dataVersion,
