@@ -63,7 +63,7 @@ export class HlsStacGeoparquetStack extends Stack {
     );
 
     // Create the lambda function
-    const maxConcurrency = 4;
+    const maxConcurrency = 12;
     const lambdaRuntime = lambda.Runtime.PYTHON_3_13;
     this.cacheDailyFunction = new lambda.Function(this, "CacheDailyFunction", {
       runtime: lambdaRuntime,
