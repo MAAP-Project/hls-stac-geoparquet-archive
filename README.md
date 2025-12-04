@@ -74,9 +74,8 @@ Deploy scalable processing infrastructure with AWS CDK:
 - **Monthly Workflow State Machine**: Orchestrates single month processing (cache-daily → write-monthly)
 - **Backfill Workflow State Machine**: Orchestrates multi-month historical backfill (max 3 months in parallel)
 - **EventBridge Rules**: Automated monthly trigger on 15th of each month (disabled by default)
-- **SNS + SQS + DLQ**: Message queue for cache-daily operations with dead letter queue for failures
 - **CloudWatch Alarms**: Monitor Lambda errors, throttles, and Step Functions failures
-- **Storage**: S3 bucket for parquet data and cached STAC links
+- **Storage**: S3 bucket for cached STAC links
 - **Logging**: CloudWatch logs for all Lambda functions and Step Functions executions
 
 ### Deployment
@@ -99,9 +98,9 @@ The Step Functions state machine automatically runs on the 15th of each month (w
 **Input Parameters:**
 
 - **`collection`** (required): Either `"HLSL30"` or `"HLSS30"`
-- **`dest`** (optional): S3 destination path (e.g., `"s3://bucket-name"`). Defaults to stack bucket
 - **`yearmonth`** (optional): Specific month to process in format `"YYYY-MM-DD"` (day is ignored). If not provided, processes previous month
-- **`version`** (optional): Version string for output path (e.g., `"v0.1.0"`). Defaults to deployed version
+
+Note: `dest` and `version` are configured at deployment time and cannot be overridden at runtime.
 
 **Manual Invocation:**
 
@@ -116,19 +115,13 @@ STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
 aws stepfunctions start-execution \
   --state-machine-arn "$STATE_MACHINE_ARN" \
   --name "manual-hlsl30-$(date +%Y%m%d-%H%M%S)" \
-  --input '{"collection": "HLSL30", "dest": "s3://your-bucket"}'
+  --input '{"collection": "HLSL30"}'
 
 # Start execution - process a specific month
 aws stepfunctions start-execution \
   --state-machine-arn "$STATE_MACHINE_ARN" \
   --name "manual-hlsl30-2024-11-$(date +%Y%m%d-%H%M%S)" \
-  --input '{"collection": "HLSL30", "dest": "s3://your-bucket", "yearmonth": "2024-11-01"}'
-
-# Start execution - with custom version
-aws stepfunctions start-execution \
-  --state-machine-arn "$STATE_MACHINE_ARN" \
-  --name "manual-hlsl30-v0.2.0-$(date +%Y%m%d-%H%M%S)" \
-  --input '{"collection": "HLSL30", "dest": "s3://your-bucket", "yearmonth": "2024-11-01", "version": "v0.2.0"}'
+  --input '{"collection": "HLSL30", "yearmonth": "2024-11-01"}'
 
 # Monitor execution
 EXECUTION_ARN=$(aws stepfunctions list-executions \
@@ -218,10 +211,10 @@ The backfill workflow is a parent Step Functions state machine that orchestrates
 **Input Parameters:**
 
 - **`collection`** (required): Either `"HLSL30"` or `"HLSS30"`
-- **`dest`** (required): S3 destination path (e.g., `"s3://bucket-name"`)
 - **`start_date`** (optional): ISO format date (YYYY-MM-DD). Defaults to collection origin date (HLSL30: 2013-04-01, HLSS30: 2015-11-01)
 - **`end_date`** (optional): ISO format date (YYYY-MM-DD). Defaults to last complete month
-- **`version`** (optional): Version string for output path (e.g., `"v0.1.0"`)
+
+Note: `dest` and `version` are configured at deployment time and cannot be overridden at runtime.
 
 **Running a Backfill:**
 
@@ -237,7 +230,7 @@ BACKFILL_STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
 aws stepfunctions start-execution \
   --state-machine-arn "$BACKFILL_STATE_MACHINE_ARN" \
   --name "backfill-hlsl30-full-$(date +%Y%m%d-%H%M%S)" \
-  --input '{"collection": "HLSL30", "dest": "s3://your-bucket"}'
+  --input '{"collection": "HLSL30"}'
 
 # Backfill specific date range (2020-2024)
 aws stepfunctions start-execution \
@@ -245,10 +238,8 @@ aws stepfunctions start-execution \
   --name "backfill-hlsl30-2020s-$(date +%Y%m%d-%H%M%S)" \
   --input '{
     "collection": "HLSL30",
-    "dest": "s3://your-bucket",
     "start_date": "2020-01-01",
-    "end_date": "2024-12-01",
-    "version": "v0.1.0"
+    "end_date": "2024-12-01"
   }'
 
 # Monitor execution progress
@@ -289,7 +280,7 @@ STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
 aws stepfunctions start-execution \
   --state-machine-arn "$STATE_MACHINE_ARN" \
   --name "manual-2024-11-$(date +%Y%m%d-%H%M%S)" \
-  --input '{"collection": "HLSL30", "dest": "s3://your-bucket", "yearmonth": "2024-11-01"}'
+  --input '{"collection": "HLSL30", "yearmonth": "2024-11-01"}'
 ```
 
 **Option 2: Direct write-monthly Lambda Invocation**
@@ -314,13 +305,13 @@ aws logs tail "/aws/lambda/$WRITE_MONTHLY_FUNCTION" --follow
 ```
 
 **Available Parameters:**
-- `collection`: "HLSL30" or "HLSS30"
-- `yearmonth`: Format "YYYY-MM-DD" (e.g., "2024-01-01") - day is ignored
-- `dest`: Optional. S3 destination path (e.g., "s3://bucket-name"), defaults to stack bucket
+- `collection`: "HLSL30" or "HLSS30" (required)
+- `yearmonth`: Format "YYYY-MM-DD" (e.g., "2024-01-01") - day is ignored (required)
 - `require_complete_links`: Optional. Boolean (default: true) - require all daily cache files before processing
 - `skip_existing`: Optional. Boolean (default: true) - skip if output file already exists
-- `version`: Optional. Version string for output path (e.g., "v0.1.0"), defaults to deployed version
 - `batch_size`: Optional. Number of items per batch (default: 1000)
+
+Note: `dest` and `version` are configured at deployment time via environment variables.
 
 
 ### Monitoring
@@ -378,31 +369,6 @@ aws logs filter-events \
   --log-group-name "/aws/lambda/$CACHE_DAILY_FUNCTION" \
   --filter-pattern "ERROR" \
   --start-time $(date -d '1 hour ago' +%s)000
-```
-
-Check SQS queue depth:
-
-```bash
-# Get queue URLs
-QUEUE_URL=$(aws cloudformation describe-stacks \
-  --stack-name HlsStacGeoparquetArchive \
-  --query 'Stacks[0].Outputs[?OutputKey==`QueueUrl`].OutputValue' \
-  --output text)
-
-DLQ_URL=$(aws cloudformation describe-stacks \
-  --stack-name HlsStacGeoparquetArchive \
-  --query 'Stacks[0].Outputs[?OutputKey==`DeadLetterQueueUrl`].OutputValue' \
-  --output text)
-
-# Check messages in main queue
-aws sqs get-queue-attributes \
-  --queue-url "$QUEUE_URL" \
-  --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible
-
-# Check messages in dead letter queue (failed messages)
-aws sqs get-queue-attributes \
-  --queue-url "$DLQ_URL" \
-  --attribute-names ApproximateNumberOfMessages
 ```
 
 #### CloudWatch Alarms

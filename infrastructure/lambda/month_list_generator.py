@@ -10,8 +10,8 @@ logger.setLevel(logging.INFO)
 
 # Collection-specific origin dates (when data starts being available)
 COLLECTION_ORIGIN_DATES = {
-    "HLSL30": "2013-04-01",  # Landsat 8 launch + HLS processing start
-    "HLSS30": "2015-11-01",  # Sentinel-2A launch + HLS processing start
+    "HLSL30": datetime(2013, 4, 11),  # Landsat 8 launch + HLS processing start
+    "HLSS30": datetime(2015, 11, 28),  # Sentinel-2A launch + HLS processing start
 }
 
 
@@ -26,23 +26,21 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     {
         "collection": "HLSL30" or "HLSS30",
         "start_date": "YYYY-MM-DD",  # optional, defaults to collection origin date
-        "end_date": "YYYY-MM-DD",    # optional, defaults to last complete month
-        "dest": "s3://bucket/path",  # required
-        "version": "v0.1.0"          # optional
+        "end_date": "YYYY-MM-DD"     # optional, defaults to last complete month
     }
 
     Returns:
         dict: Response with array of month objects for Map state processing
         {
             "collection": "HLSL30",
-            "dest": "s3://bucket/path",
-            "version": "v0.1.0",  # if provided
             "months": [
-                {"yearmonth": "2013-04-01", "collection": "HLSL30", "dest": "s3://..."},
-                {"yearmonth": "2013-05-01", "collection": "HLSL30", "dest": "s3://..."},
+                {"yearmonth": "2013-04-01", "collection": "HLSL30"},
+                {"yearmonth": "2013-05-01", "collection": "HLSL30"},
                 ...
             ]
         }
+
+    Note: dest and version are configured at deployment time via Lambda environment variables.
     """
     logger.info(f"Month list generator invoked with event: {json.dumps(event)}")
 
@@ -56,10 +54,6 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             f"Invalid collection: {collection}. Must be 'HLSL30' or 'HLSS30'"
         )
 
-    dest = event.get("dest")
-    if not dest:
-        raise ValueError("Missing required parameter: 'dest'")
-
     # Parse start_date (default to collection origin)
     start_date_str = event.get("start_date")
     if start_date_str:
@@ -70,7 +64,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
                 f"Invalid start_date format: {start_date_str}. Expected ISO format (YYYY-MM-DD)"
             )
     else:
-        start_date = datetime.fromisoformat(COLLECTION_ORIGIN_DATES[collection])
+        start_date = COLLECTION_ORIGIN_DATES[collection]
         logger.info(
             f"No start_date provided, using collection origin: {start_date.date()}"
         )
@@ -116,12 +110,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         month_obj = {
             "yearmonth": current_date.strftime("%Y-%m-01"),
             "collection": collection,
-            "dest": dest,
         }
-
-        # Include version if provided
-        if "version" in event:
-            month_obj["version"] = event["version"]
 
         months.append(month_obj)
 
@@ -141,14 +130,10 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
 
     response = {
         "collection": collection,
-        "dest": dest,
         "months": months,
         "num_months": num_months,
         "start_date": start_date.strftime("%Y-%m-01"),
         "end_date": end_date.strftime("%Y-%m-01"),
     }
-
-    if "version" in event:
-        response["version"] = event["version"]
 
     return response

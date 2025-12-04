@@ -50,11 +50,11 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         raise ValueError("Missing required parameter: 'date'")
     logger.info(f"Date: {date_str}")
 
-    # Get dest from DEST environment variable
+    # Get dest from DEST environment variable (link bucket)
     dest = os.environ.get("DEST")
     if not dest:
         raise ValueError("DEST environment variable not set")
-    logger.info(f"Using DEST for STAC JSON links: {dest}")
+    logger.info(f"Using DEST for writing STAC JSON links: {dest}")
 
     # Convert collection string to enum
     logger.info("Converting collection string to enum")
