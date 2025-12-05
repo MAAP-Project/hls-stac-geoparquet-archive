@@ -310,6 +310,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#example-item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example item
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -377,6 +388,17 @@
     <span class="md-ellipsis">
       
         rustac
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example item
       
     </span>
   </a>
@@ -862,13 +884,14 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="overview">Overview<a class="anchor-link" href="#overview">¶</a></h1><p>The HLS STAC Geoparquet Archive is an unofficial copy of the HLS 2.0 granule metadata represented as STAC items in a hive-partitioned parquet dataset. The parquet files are generated monthly from CMR API Granule queries on the 15th of the following month (e.g. October 2025 files are generated on November 15 2025).</p>
+<h1 id="overview">Overview<a class="anchor-link" href="#overview">¶</a></h1><p>The HLS STAC Geoparquet Archive is an unofficial copy of the HLS 2.0 granule STAC item metadata that is generated in the HLS pipeline. The data are stored in two hive-partitioned parquet datasets (one per collection, partitioned by year and month). The parquet files are generated monthly from CMR API Granule queries on the 15th of the following month (e.g. October 2025 files are generated on November 15 2025).</p>
 <blockquote>
 <p>Warning: This archive is not guaranteed to contain all of the records available in CMR</p>
 </blockquote>
-<p>The parquet files can be accessed from the <code>nasa-maap-data-store</code> bucket in AWS S3 (us-west-2):
-<code>s3://nasa-maap-data-store/file-staging/nasa-map/hls-stac-geoparquet-archive/v2/{collection}/year={year}/month={month}/{collection}-{year}-{month}.parquet</code>
-where <code>collection</code> is either <code>HLSL30_2.0</code> (Landsat) or <code>HLSS30_2.0</code> (Sentinel-2).</p>
+<p>The parquet files can be accessed from the <code>nasa-maap-data-store</code> bucket in AWS S3 (us-west-2):</p>
+<pre><code>s3://nasa-maap-data-store/file-staging/nasa-map/hls-stac-geoparquet-archive/v2/{collection}/year={year}/month={month}/{collection}-{year}-{month}.parquet
+</code></pre>
+<p>where <code>collection</code> is either <code>HLSL30_2.0</code> (Landsat) or <code>HLSS30_2.0</code> (Sentinel-2).</p>
 <h2 id="usage">Usage<a class="anchor-link" href="#usage">¶</a></h2><h3 id="rustac">rustac<a class="anchor-link" href="#rustac">¶</a></h3><p>The <a href="https://stac-utils.github.io/rustac-py/latest/">rustac</a> package can be used to query the archive via the <code>DuckdbClient</code> interface. To use this approach your environment must be configured with AWS credentials that provide <code>ListBucket</code> access to the <code>nasa-maap-data-store</code> bucket in S3 (this will work in the MAAP hub).</p>
 <blockquote>
 <p>Note: The HLSL30_2.0 and HLSS30_2.0 collections must be queried separately because the STAC items have slightly different parquet schemas.</p>
@@ -876,13 +899,13 @@ where <code>collection</code> is either <code>HLSL30_2.0</code> (Landsat) or <co
 </div>
 </div>
 </div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=28c0367b-cd17-44fd-aa0f-63b412b0f9dd">
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=19d21b86-4d84-47b9-81c1-44e7082bdfbd">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [2]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
 <clipboard-copy ,="" aria-label="Copy to Clipboard" for="cell-1">
@@ -929,8 +952,6 @@ where <code>collection</code> is either <code>HLSL30_2.0</code> (Landsat) or <co
     <span class="n">bbox</span><span class="o">=</span><span class="n">bbox</span><span class="p">,</span>
 <span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hls_s30_items</span><span class="p">)</span><span class="si">}</span><span class="s2"> HLSS30_2.0 items"</span><span class="p">)</span>
-
-<span class="n">Item</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">hls_s30_items</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
 </pre></div>
 <div class="clipboard-copy-txt" id="cell-1">from pystac import Item
 from rustac import DuckdbClient
@@ -965,9 +986,45 @@ hls_s30_items = client.search(
     datetime=datetime,
     bbox=bbox,
 )
-print(f"found {len(hls_s30_items)} HLSS30_2.0 items")
-
-Item.from_dict(hls_s30_items[0])</div>
+print(f"found {len(hls_s30_items)} HLSS30_2.0 items")</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=a1e7d08c-a62b-4e75-9fcc-bc872654afbc">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h3 id="example-item">Example item<a class="anchor-link" href="#example-item">¶</a></h3>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=28c0367b-cd17-44fd-aa0f-63b412b0f9dd">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [2]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="CodeMirror cm-s-jupyter">
+<div class="zeroclipboard-container">
+<clipboard-copy ,="" aria-label="Copy to Clipboard" for="cell-2">
+<div>
+<span class="notice" hidden="">Copied!</span>
+<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
+<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+</clipboard-copy>
+</div>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">Item</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">hls_s30_items</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+</pre></div>
+<div class="clipboard-copy-txt" id="cell-2">Item.from_dict(hls_s30_items[0])</div>
 </div>
 </div>
 </div>
