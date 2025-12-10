@@ -1,8 +1,6 @@
 *
 !infrastructure/lambda/*.py
-!infrastructure/Dockerfile.ecr
-!infrastructure/Dockerfile.lambda
-!infrastructure/entrypoint.sh
+!Dockerfile
 !.python-version
 !pyproject.toml
 !README.md

@@ -77,20 +77,20 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         try:
             collection = HlsCollection[collection_str]
             logger.info(f"Collection enum: {collection}")
-        except KeyError:
+        except KeyError as e:
             raise ValueError(
                 f"Invalid collection: {collection_str}. Must be 'HLSL30' or 'HLSS30'"
-            )
+            ) from e
 
         # Parse yearmonth
         logger.info("Parsing yearmonth")
         try:
             yearmonth = datetime.fromisoformat(yearmonth_str)
             logger.info(f"Parsed yearmonth: {yearmonth.year}-{yearmonth.month:02d}")
-        except ValueError:
+        except ValueError as e:
             raise ValueError(
                 f"Invalid yearmonth format: {yearmonth_str}. Expected ISO format (YYYY-MM-DD)"
-            )
+            ) from e
 
         # Extract optional parameters
         logger.info("Processing optional parameters")

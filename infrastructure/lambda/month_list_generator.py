@@ -55,8 +55,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         )
 
     # Parse start_date (default to collection origin)
-    start_date_str = event.get("start_date")
-    if start_date_str:
+    if start_date_str := event.get("start_date"):
         try:
             start_date = datetime.fromisoformat(start_date_str)
         except ValueError:
@@ -73,8 +72,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     start_date = start_date.replace(day=1)
 
     # Parse end_date (default to first day of current month)
-    end_date_str = event.get("end_date")
-    if end_date_str:
+    if end_date_str := event.get("end_date"):
         try:
             end_date = datetime.fromisoformat(end_date_str)
         except ValueError:
@@ -128,12 +126,10 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         f"{start_date.date()} to {end_date.date()}"
     )
 
-    response = {
+    return {
         "collection": collection,
         "months": months,
         "num_months": num_months,
         "start_date": start_date.strftime("%Y-%m-01"),
         "end_date": end_date.strftime("%Y-%m-01"),
     }
-
-    return response

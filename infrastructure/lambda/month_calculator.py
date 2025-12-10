@@ -108,11 +108,8 @@ def handler(event, context):
             }
         )
 
-    # Build response for Step Functions
-    response = {
+    return {
         "collection": collection,
         "yearMonth": first_of_month.strftime("%Y-%m-01"),
         "dates": dates,
     }
-
-    return response
