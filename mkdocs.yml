@@ -1,0 +1,105 @@
+site_name: HLS STAC Geoparquet Archive
+site_description: STAC Geoparquet archive of the HLS granule STAC items
+site_url:  https://MAAP-Project.github.io/hls-stac-geoparquet-archive
+site_author: MAAP Project
+repo_name: MAAP-Project/hls-stac-geoparquet-archive
+repo_url: https://github.com/MAAP-Project/hls-stac-geoparquet-archive
+
+docs_dir: 'docs'
+site_dir: 'build'
+
+extra:
+  social:
+    - icon: "fontawesome/brands/github"
+      link: "https://github.com/MAAP-Project"
+
+extra_css:
+  - overrides/stylesheets/extra.css
+
+watch:
+  - docs
+
+plugins:
+  - mkdocs-jupyter:
+      include_source: false
+      include_requirejs: true
+      execute: false
+      allow_errors: false
+      ignore_h1_titles: true
+      remove_tag_config:
+        remove_input_tags:
+          - hide_code
+
+theme:
+  name: material
+  logo: assets/logo.jpeg
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      primary: default
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: default
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - navigation.indexes
+    - navigation.tracking
+    - search.suggest
+    - search.share
+
+# https://github.com/developmentseed/titiler/blob/50934c929cca2fa8d3c408d239015f8da429c6a8/docs/mkdocs.yml#L115-L140
+markdown_extensions:
+  - admonition
+  - attr_list
+  - codehilite:
+      guess_lang: false
+  - def_list
+  - footnotes
+  - github-callouts
+  - md_in_html
+  - tables
+  - pymdownx.arithmatex
+  - pymdownx.betterem
+  - pymdownx.caret:
+      insert: false
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.escapeall:
+      hardbreak: true
+      nbsp: true
+  - pymdownx.magiclink:
+      hide_protocol: true
+      repo_url_shortener: true
+  - pymdownx.smartsymbols
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+  - toc:
+      permalink: true
