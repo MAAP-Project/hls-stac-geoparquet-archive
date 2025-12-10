@@ -5,7 +5,7 @@ CLIENT_ID = "nasa-maap-hls-stac-geoparquet; contact henry@developmentseed.org"
 TEST = "test"
 LINK_PATH_PREFIX = "links/{collection_id}/{year}/{month:02d}"
 LINK_PATH_FORMAT = LINK_PATH_PREFIX + "/{year}-{month:02d}-{day:02d}.json"
-PARQUET_PATH_FORMAT = "v{version}/{collection_id}/year={year}/month={month}/{collection_id}-{year}-{month}.parquet"
+PARQUET_PATH_FORMAT = "{version}/{collection_id}/year={year}/month={month}/{collection_id}-{year}-{month}.parquet"
 
 # Collection-specific origin dates (when data starts being available)
 COLLECTION_ORIGIN_DATES = {

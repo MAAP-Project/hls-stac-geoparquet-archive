@@ -19,7 +19,6 @@ from obstore.store import from_url
 from rustac.geoparquet import geoparquet_writer
 from rustac.rustac import GeoparquetWriter
 
-from hls_stac_parquet import __version__
 from hls_stac_parquet.cmr_api import HlsCollection
 from hls_stac_parquet.constants import (
     LINK_PATH_FORMAT,
@@ -34,7 +33,7 @@ logging.basicConfig(
 
 logging.getLogger("stac_io").setLevel("WARN")
 
-logger = logging.getLogger("hls-stac-geoparquet-archive")
+logger = logging.getLogger(__name__)
 
 # Suppress warning about store reconstruction across modules (expected behavior)
 warnings.filterwarnings(
@@ -206,6 +205,12 @@ async def write_monthly_stac_geoparquet(
         datetime,
         typer.Argument(help="Year and month to process (YYYY-MM-DD, day is ignored)"),
     ],
+    source: Annotated[
+        str,
+        typer.Argument(
+            help="Source URL for reading the STAC JSON link files (e.g., s3://bucket/path)"
+        ),
+    ],
     dest: Annotated[
         str,
         typer.Argument(
@@ -213,8 +218,9 @@ async def write_monthly_stac_geoparquet(
         ),
     ],
     version: Annotated[
-        str, typer.Option(help="Version string for output file path")
-    ] = __version__,
+        str,
+        typer.Argument(help="Version string for output file path"),
+    ],
     require_complete_links: Annotated[
         bool,
         typer.Option(
@@ -236,7 +242,8 @@ async def write_monthly_stac_geoparquet(
     Collects cached STAC JSON links for a given month, fetches all STAC items,
     and writes them to a GeoParquet file in object storage.
     """
-    store = from_url(dest)
+    source_store = from_url(source)
+    dest_store = from_url(dest)
 
     year = yearmonth.year
     month = yearmonth.month
@@ -249,13 +256,13 @@ async def write_monthly_stac_geoparquet(
     )
 
     if skip_existing:
-        if await _check_exists(store, out_path):
+        if await _check_exists(dest_store, out_path):
             logger.info(f"{out_path} found in {dest}... skipping")
             return
 
     stac_json_links = []
     stream = obstore.list(
-        store,
+        source_store,
         prefix=LINK_PATH_PREFIX.format(
             collection_id=collection.collection_id,
             year=year,
@@ -267,7 +274,7 @@ async def write_monthly_stac_geoparquet(
     async for list_result in stream:
         for result in list_result:
             actual_links.append(result["path"])
-            resp = await obstore.get_async(store, result["path"])
+            resp = await obstore.get_async(source_store, result["path"])
             buffer = await resp.bytes_async()
             links = json.loads(bytes(buffer).decode())
             stac_json_links.extend(links)
@@ -304,7 +311,7 @@ async def write_monthly_stac_geoparquet(
     )
 
     # Initialize writer with first batch and run producer/consumer concurrently
-    async with geoparquet_writer(first_batch, out_path, store=store) as writer:
+    async with geoparquet_writer(first_batch, out_path, store=dest_store) as writer:
         logger.info(
             f"{collection.collection_id}: initialized writer with {len(first_batch)} items"
         )

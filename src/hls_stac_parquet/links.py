@@ -22,7 +22,7 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
 
-logger = logging.getLogger("hls-stac-geoparquet-archive")
+logger = logging.getLogger(__name__)
 
 
 async def _check_exists(store, path) -> bool:

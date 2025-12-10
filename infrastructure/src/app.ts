@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 import * as cdk from "aws-cdk-lib";
-import { HlsBatchStack } from "./hls-batch-stack";
+import { HlsStacGeoparquetStack } from "./hls-stac-geoparquet-stack";
 
 const app = new cdk.App();
 
-new HlsBatchStack(app, "HlsBatchStack", {
-  description: "HLS STAC Parquet processing with AWS Batch",
+new HlsStacGeoparquetStack(app, "HlsStacGeoparquetArchive", {
+  description: "HLS STAC Geoparquet Archive",
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION || "us-east-1",
+    region: process.env.CDK_DEFAULT_REGION || "us-west-2",
   },
-  bucketName: "hls-stac-geoparquet",
+  linkBucket: "hls-stac-geoparquet",
+  destBucket: "nasa-maap-data-store",
+  destPath: "file-staging/nasa-map/hls-stac-geoparquet-archive",
+  dataVersion: "v2",
 });
-

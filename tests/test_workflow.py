@@ -79,24 +79,29 @@ async def test_cache_daily_stac_json_links():
 async def test_write_monthly_stac_geoparquet():
     # tried using MemoryStore but it didn't work :/
     with TemporaryDirectory() as tempdir:
-        await cache_daily_stac_json_links(
-            HlsCollection.HLSL30,
-            date=datetime(2025, 10, 2),
-            dest=f"file://{tempdir}",
-            bounding_box=TEST_BOUNDING_BOX,
-        )
+        with pytest.warns(RuntimeWarning, match="Successfully reconstructed a store"):
+            await cache_daily_stac_json_links(
+                HlsCollection.HLSL30,
+                date=datetime(2025, 10, 2),
+                dest=f"file://{tempdir}",
+                bounding_box=TEST_BOUNDING_BOX,
+            )
 
-        await write_monthly_stac_geoparquet(
-            HlsCollection.HLSL30,
-            yearmonth=datetime(2025, 10, 1),
-            dest=f"file://{tempdir}",
-            require_complete_links=False,
-        )
+            await write_monthly_stac_geoparquet(
+                HlsCollection.HLSL30,
+                yearmonth=datetime(2025, 10, 1),
+                source=f"file://{tempdir}",
+                dest=f"file://{tempdir}",
+                version="v2",
+                require_complete_links=False,
+            )
 
         with pytest.raises(ValueError, match="expected these links:"):
             await write_monthly_stac_geoparquet(
                 HlsCollection.HLSL30,
                 yearmonth=datetime(2025, 10, 1),
+                source=f"file://{tempdir}",
                 dest=f"file://{tempdir}",
+                version="v2",
                 require_complete_links=True,
             )
