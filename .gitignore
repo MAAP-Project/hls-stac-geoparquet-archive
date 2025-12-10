@@ -12,3 +12,5 @@ wheels/
 # npm
 infrastructure/node_modules/
 infrastructure/cdk.out/
+
+docs/.ipynb_checkpoints/
