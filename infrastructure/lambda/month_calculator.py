@@ -1,12 +1,16 @@
 """Calculate previous month and generate dates array for Step Functions Map state."""
 
 from calendar import monthrange
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 # Collection-specific origin dates (when data starts being available)
 COLLECTION_ORIGIN_DATES = {
-    "HLSL30": datetime(2013, 4, 11),  # Landsat 8 launch + HLS processing start
-    "HLSS30": datetime(2015, 11, 28),  # Sentinel-2A launch + HLS processing start
+    "HLSL30": datetime(
+        2013, 4, 11, tzinfo=UTC
+    ),  # Landsat 8 launch + HLS processing start
+    "HLSS30": datetime(
+        2015, 11, 28, tzinfo=UTC
+    ),  # Sentinel-2A launch + HLS processing start
 }
 
 
@@ -21,29 +25,31 @@ def handler(event, context):
     {
         "collection": "HLSL30" or "HLSS30",
         "yearmonth": "2024-11-01",  # optional, specific month to process (YYYY-MM-DD)
-        "time": "2024-12-15T10:00:00Z"  # optional, from EventBridge (ignored if yearmonth provided)
+        "time": "2024-12-15T10:00:00Z",  # optional, from EventBridge (ignored if yearmonth provided)
+        "skip_existing": false  # optional, whether to skip existing files (default: true)
     }
 
     Output format:
     {
         "collection": "HLSL30",
         "yearMonth": "2024-11-01",
+        "skip_existing": false,
         "dates": [
             {
                 "date": "2024-11-01",
                 "collection": "HLSL30",
-                "skip_existing": true
+                "skip_existing": false
             },
             {
                 "date": "2024-11-02",
                 "collection": "HLSL30",
-                "skip_existing": true
+                "skip_existing": false
             },
             ...
             {
                 "date": "2024-11-30",
                 "collection": "HLSL30",
-                "skip_existing": true
+                "skip_existing": false
             }
         ]
     }
@@ -57,6 +63,9 @@ def handler(event, context):
     """
     # Extract parameters
     collection = event.get("collection")
+    skip_existing = event.get(
+        "skip_existing", True
+    )  # Default to True for backward compatibility
 
     # Determine which month to process
     if "yearmonth" in event:
@@ -104,12 +113,13 @@ def handler(event, context):
             {
                 "date": date_obj.strftime("%Y-%m-%d"),
                 "collection": collection,
-                "skip_existing": True,  # Always skip existing for automated runs
+                "skip_existing": skip_existing,
             }
         )
 
     return {
         "collection": collection,
         "yearMonth": first_of_month.strftime("%Y-%m-01"),
+        "skip_existing": skip_existing,
         "dates": dates,
     }

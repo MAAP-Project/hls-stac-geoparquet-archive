@@ -230,7 +230,7 @@ export class HlsStacGeoparquetStack extends Stack {
         "collection.$": "$.collection",
         "yearmonth.$": "$.yearMonth",
         require_complete_links: true,
-        skip_existing: true,
+        "skip_existing.$": "$.skip_existing",
       }),
       outputPath: "$.Payload",
       comment: "Write monthly GeoParquet file",
@@ -389,6 +389,7 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSL30",
+          skip_existing: false,
           time: events.EventField.time,
         }),
       }),
@@ -412,6 +413,7 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSS30",
+          skip_existing: false,
           time: events.EventField.time,
         }),
       }),
@@ -636,17 +638,18 @@ export class HlsStacGeoparquetStack extends Stack {
 
     new CfnOutput(this, "ExampleStepFunctionsCommand", {
       value: [
-        "# Process previous month (default):",
+        "# Process previous month with skip_existing=true (skip already processed data):",
         "aws stepfunctions start-execution",
         `--state-machine-arn ${this.monthlyWorkflowStateMachine.stateMachineArn}`,
         '--name "test-$(date +%Y%m%d-%H%M%S)"',
         "--input '",
         JSON.stringify({
           collection: "HLSL30",
+          skip_existing: true,
         }),
         "'",
         "",
-        "# Process specific month:",
+        "# Process specific month with skip_existing=false (reprocess all data):",
         "aws stepfunctions start-execution",
         `--state-machine-arn ${this.monthlyWorkflowStateMachine.stateMachineArn}`,
         '--name "test-2024-11-$(date +%Y%m%d-%H%M%S)"',
@@ -654,6 +657,7 @@ export class HlsStacGeoparquetStack extends Stack {
         JSON.stringify({
           collection: "HLSL30",
           yearmonth: "2024-11-01",
+          skip_existing: false,
         }),
         "'",
       ].join(" \\\n  "),
