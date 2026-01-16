@@ -151,46 +151,6 @@ aws events enable-rule --name "$HLSL30_RULE"
 aws events enable-rule --name "$HLSS30_RULE"
 ```
 
-#### Manual Cache Daily STAC Links (SNS + Lambda)
-
-For ad-hoc caching or testing:
-
-Publish messages to SNS to trigger the Lambda function. Get the SNS topic ARN from CloudFormation outputs:
-
-```bash
-# Get the SNS topic ARN
-SNS_TOPIC_ARN=$(aws cloudformation describe-stacks \
-  --stack-name HlsStacGeoparquetArchive \
-  --query 'Stacks[0].Outputs[?OutputKey==`TopicArn`].OutputValue' \
-  --output text)
-
-# Cache for a single date
-aws sns publish \
-  --topic-arn "$SNS_TOPIC_ARN" \
-  --message '{
-    "collection": "HLSL30",
-    "date": "2024-01-15"
-  }'
-
-# Cache with optional parameters
-aws sns publish \
-  --topic-arn "$SNS_TOPIC_ARN" \
-  --message '{
-    "collection": "HLSS30",
-    "date": "2024-01-15",
-    "bounding_box": [-100, 40, -90, 50],
-    "protocol": "s3",
-    "skip_existing": true
-  }'
-
-# Cache all days in a month (bash script example)
-for day in {01..31}; do
-  aws sns publish \
-    --topic-arn "$SNS_TOPIC_ARN" \
-    --message "{\"collection\": \"HLSL30\", \"date\": \"2024-01-${day}\"}"
-done
-```
-
 #### Historical Backfills (Backfill Workflow)
 
 > **WARNING:** The backfill workflow will query NASA's CMR API very heavily. It processes multiple months in parallel, with each month making ~30 CMR requests. Use responsibly and consider rate limiting for large historical backfills.
