@@ -23,7 +23,7 @@ plugins:
   - mkdocs-jupyter:
       include_source: false
       include_requirejs: true
-      execute: false
+      execute: true
       allow_errors: false
       ignore_h1_titles: true
       remove_tag_config:
