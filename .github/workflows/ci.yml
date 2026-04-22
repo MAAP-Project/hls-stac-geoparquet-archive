@@ -61,4 +61,7 @@ jobs:
 
       - name: Deploy
         working-directory: infrastructure
+        env:
+          EARTHDATA_USERNAME: ${{ vars.EARTHDATA_USERNAME }}
+          EARTHDATA_PASSWORD: ${{ secrets.EARTHDATA_PASSWORD }}
         run: npx cdk deploy --all
