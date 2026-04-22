@@ -235,12 +235,15 @@ async def write_monthly_stac_geoparquet(
         int,
         typer.Argument(help="batch size for writing STAC items to parquet files"),
     ] = 1000,
-) -> None:
+) -> int:
     """
     Write monthly STAC items to GeoParquet format.
 
     Collects cached STAC JSON links for a given month, fetches all STAC items,
     and writes them to a GeoParquet file in object storage.
+
+    Returns:
+        Total number of STAC items written to the GeoParquet file (0 if skipped).
     """
     source_store = from_url(source)
     dest_store = from_url(dest)
@@ -258,7 +261,7 @@ async def write_monthly_stac_geoparquet(
     if skip_existing:
         if await _check_exists(dest_store, out_path):
             logger.info(f"{out_path} found in {dest}... skipping")
-            return
+            return 0
 
     stac_json_links = []
     stream = obstore.list(
@@ -333,3 +336,4 @@ async def write_monthly_stac_geoparquet(
         logger.warning(f"failed to retrieve {len(all_failed_links)} items")
 
     logger.info(f"successfully wrote {total_items_written} items to {out_path}")
+    return total_items_written

@@ -228,7 +228,10 @@ export class HlsStacGeoparquetStack extends Stack {
       lambdaFunction: this.writeMonthlyFunction,
       payload: sfn.TaskInput.fromObject({
         "collection.$": "$.collection",
-        "yearmonth.$": "$.yearMonth",
+        "yearmonth.$": sfn.JsonPath.format(
+          "{}-01",
+          sfn.JsonPath.stringAt("$.yearMonth"),
+        ),
         require_complete_links: true,
         "skip_existing.$": "$.skip_existing",
       }),
@@ -255,8 +258,52 @@ export class HlsStacGeoparquetStack extends Stack {
       cause: "Monthly workflow failed during execution",
     });
 
-    // Add error handler to write-monthly step
-    writeMonthly.addCatch(failure, {
+    // Notify success via SNS with collection, month, and record count
+    // At this point outputPath: "$.Payload" has replaced state with the Lambda response,
+    // so $.collection, $.yearmonth, and $.total_items_written are all available.
+    const notifySuccess = new tasks.SnsPublish(this, "NotifySuccess", {
+      topic: this.alertTopic,
+      subject: sfn.JsonPath.format(
+        "HLS STAC GeoParquet Archive updated: {} {}",
+        sfn.JsonPath.stringAt("$.collection"),
+        sfn.JsonPath.stringAt("$.yearmonth"),
+      ),
+      message: sfn.TaskInput.fromText(
+        sfn.JsonPath.format(
+          "The HLS STAC GeoParquet Archive for {} ({}) was updated and now contains {} records.",
+          sfn.JsonPath.stringAt("$.yearmonth"),
+          sfn.JsonPath.stringAt("$.collection"),
+          sfn.JsonPath.stringAt("$.total_items_written"),
+        ),
+      ),
+      resultPath: sfn.JsonPath.DISCARD,
+    });
+
+    // Notify failure via SNS with collection, month, and error details.
+    // The catch fires on the input to WriteMonthly (before outputPath transforms it),
+    // so $.collection and $.yearMonth are still available alongside $.error.
+    const notifyFailure = new tasks.SnsPublish(this, "NotifyFailure", {
+      topic: this.alertTopic,
+      subject: sfn.JsonPath.format(
+        "HLS STAC GeoParquet Archive FAILED: {} {}",
+        sfn.JsonPath.stringAt("$.collection"),
+        sfn.JsonPath.stringAt("$.yearMonth"),
+      ),
+      message: sfn.TaskInput.fromText(
+        sfn.JsonPath.format(
+          "The HLS STAC GeoParquet Archive workflow failed for {} {}.\n\nError: {}\n\nCause:\n{}",
+          sfn.JsonPath.stringAt("$.collection"),
+          sfn.JsonPath.stringAt("$.yearMonth"),
+          sfn.JsonPath.stringAt("$.error.Error"),
+          sfn.JsonPath.stringAt("$.error.Cause"),
+        ),
+      ),
+      resultPath: sfn.JsonPath.DISCARD,
+    });
+    notifyFailure.next(failure);
+
+    // Add error handler to write-monthly step — route through failure notification
+    writeMonthly.addCatch(notifyFailure, {
       errors: ["States.ALL"],
       resultPath: "$.error",
     });
@@ -265,6 +312,7 @@ export class HlsStacGeoparquetStack extends Stack {
     const definition = calculatePreviousMonth
       .next(cacheAllDays)
       .next(writeMonthly)
+      .next(notifySuccess)
       .next(success);
 
     // Create state machine
@@ -370,18 +418,24 @@ export class HlsStacGeoparquetStack extends Stack {
       },
     );
 
-    // EventBridge Rules for Monthly Trigger (15th of each month)
-    // Rule for HLSL30 (10:00 AM UTC)
+    // EventBridge Rules — fire every 5 days (days 1, 6, 11, 16, 21, 26 of each month).
+    // Each trigger day runs four executions (staggered by 1 hour each):
+    //   10:00 UTC — HLSL30 previous month (straggler catch)
+    //   11:00 UTC — HLSS30 previous month (straggler catch)
+    //   12:00 UTC — HLSL30 current month (incremental build)
+    //   13:00 UTC — HLSS30 current month (incremental build)
+
+    // Previous-month rules (default month_offset=-1 in month_calculator)
     const hlsl30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSL30", {
       schedule: events.Schedule.cron({
         minute: "0",
         hour: "10",
-        day: "15",
+        day: "*/5",
         month: "*",
         year: "*",
       }),
       description:
-        "Trigger monthly HLS workflow for HLSL30 on 15th of each month",
+        "Trigger HLS workflow for HLSL30 previous month every 5 days",
       enabled: true,
     });
 
@@ -389,23 +443,23 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSL30",
+          month_offset: -1,
           skip_existing: false,
           time: events.EventField.time,
         }),
       }),
     );
 
-    // Rule for HLSS30 (11:00 AM UTC, 1 hour later to avoid overlap)
     const hlss30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSS30", {
       schedule: events.Schedule.cron({
         minute: "0",
         hour: "11",
-        day: "15",
+        day: "*/5",
         month: "*",
         year: "*",
       }),
       description:
-        "Trigger monthly HLS workflow for HLSS30 on 15th of each month",
+        "Trigger HLS workflow for HLSS30 previous month every 5 days",
       enabled: true,
     });
 
@@ -413,6 +467,64 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSS30",
+          month_offset: -1,
+          skip_existing: false,
+          time: events.EventField.time,
+        }),
+      }),
+    );
+
+    // Current-month rules (month_offset=0 in month_calculator)
+    const hlsl30CurrentMonthRule = new events.Rule(
+      this,
+      "CurrentMonthTriggerHLSL30",
+      {
+        schedule: events.Schedule.cron({
+          minute: "0",
+          hour: "12",
+          day: "*/5",
+          month: "*",
+          year: "*",
+        }),
+        description:
+          "Trigger HLS workflow for HLSL30 current month every 5 days",
+        enabled: true,
+      },
+    );
+
+    hlsl30CurrentMonthRule.addTarget(
+      new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
+        input: events.RuleTargetInput.fromObject({
+          collection: "HLSL30",
+          month_offset: 0,
+          skip_existing: false,
+          time: events.EventField.time,
+        }),
+      }),
+    );
+
+    const hlss30CurrentMonthRule = new events.Rule(
+      this,
+      "CurrentMonthTriggerHLSS30",
+      {
+        schedule: events.Schedule.cron({
+          minute: "0",
+          hour: "13",
+          day: "*/5",
+          month: "*",
+          year: "*",
+        }),
+        description:
+          "Trigger HLS workflow for HLSS30 current month every 5 days",
+        enabled: true,
+      },
+    );
+
+    hlss30CurrentMonthRule.addTarget(
+      new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
+        input: events.RuleTargetInput.fromObject({
+          collection: "HLSS30",
+          month_offset: 0,
           skip_existing: false,
           time: events.EventField.time,
         }),
@@ -420,75 +532,6 @@ export class HlsStacGeoparquetStack extends Stack {
     );
 
     // CloudWatch Alarms for monitoring
-
-    // Alarm for write-monthly Lambda errors
-    const writeMonthlyErrorAlarm = new cloudwatch.Alarm(
-      this,
-      "WriteMonthlyErrorAlarm",
-      {
-        metric: this.writeMonthlyFunction.metricErrors({
-          period: Duration.minutes(5),
-          statistic: "Sum",
-        }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        alarmDescription: "Alert when write-monthly Lambda function fails",
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      },
-    );
-    writeMonthlyErrorAlarm.addAlarmAction(
-      new cloudwatch_actions.SnsAction(this.alertTopic),
-    );
-
-    // Alarm for write-monthly Lambda success
-    const writeMonthlySuccessAlarm = new cloudwatch.Alarm(
-      this,
-      "WriteMonthlySuccessAlarm",
-      {
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/Lambda",
-          metricName: "Invocations",
-          dimensionsMap: {
-            FunctionName: this.writeMonthlyFunction.functionName,
-          },
-          period: Duration.minutes(5),
-          statistic: "Sum",
-        }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        alarmDescription:
-          "Notify when write-monthly Lambda completes successfully",
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      },
-    );
-    writeMonthlySuccessAlarm.addAlarmAction(
-      new cloudwatch_actions.SnsAction(this.alertTopic),
-    );
-
-    // Alarm for write-monthly Lambda throttles
-    const writeMonthlyThrottleAlarm = new cloudwatch.Alarm(
-      this,
-      "WriteMonthlyThrottleAlarm",
-      {
-        metric: this.writeMonthlyFunction.metricThrottles({
-          period: Duration.minutes(5),
-          statistic: "Sum",
-        }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        alarmDescription: "Alert when write-monthly Lambda is throttled",
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      },
-    );
-    writeMonthlyThrottleAlarm.addAlarmAction(
-      new cloudwatch_actions.SnsAction(this.alertTopic),
-    );
 
     // Alarm for cache-daily Lambda errors
     const cacheDailyErrorAlarm = new cloudwatch.Alarm(
@@ -508,32 +551,6 @@ export class HlsStacGeoparquetStack extends Stack {
       },
     );
     cacheDailyErrorAlarm.addAlarmAction(
-      new cloudwatch_actions.SnsAction(this.alertTopic),
-    );
-
-    // Alarm for Step Functions execution failures
-    const stateMachineFailureAlarm = new cloudwatch.Alarm(
-      this,
-      "StateMachineFailureAlarm",
-      {
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/States",
-          metricName: "ExecutionsFailed",
-          dimensionsMap: {
-            StateMachineArn: this.monthlyWorkflowStateMachine.stateMachineArn,
-          },
-          period: Duration.minutes(5),
-          statistic: "Sum",
-        }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        alarmDescription: "Alert when Step Functions workflow fails",
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      },
-    );
-    stateMachineFailureAlarm.addAlarmAction(
       new cloudwatch_actions.SnsAction(this.alertTopic),
     );
 

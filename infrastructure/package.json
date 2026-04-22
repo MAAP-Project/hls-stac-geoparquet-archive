@@ -21,6 +21,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "aws-cdk": "^2.1118.4",
     "typescript": "^5.0.0"
   },
   "dependencies": {
