@@ -84,7 +84,7 @@ def handler(event, context):
             # EventBridge provides time in ISO format with Z suffix
             now = datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
         else:
-            now = datetime.now()
+            now = datetime.now(UTC)
 
         first_of_this_month = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
@@ -124,7 +124,7 @@ def handler(event, context):
 
     return {
         "collection": collection,
-        "yearMonth": first_of_month.strftime("%Y-%m-01"),
+        "yearMonth": first_of_month.strftime("%Y-%m"),
         "skip_existing": skip_existing,
         "dates": dates,
     }
