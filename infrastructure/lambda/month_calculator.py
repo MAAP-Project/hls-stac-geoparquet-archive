@@ -16,17 +16,18 @@ COLLECTION_ORIGIN_DATES = {
 
 def handler(event, context):
     """
-    Calculate previous month and generate array of dates for cache-daily processing.
+    Calculate target month and generate array of dates for cache-daily processing.
 
     This Lambda is invoked by Step Functions to prepare the data for the Map state
-    that will process cache-daily operations for each day of the previous month.
+    that will process cache-daily operations for each day of the target month.
 
     Input event format:
     {
         "collection": "HLSL30" or "HLSS30",
         "yearmonth": "2024-11-01",  # optional, specific month to process (YYYY-MM-DD)
         "time": "2024-12-15T10:00:00Z",  # optional, from EventBridge (ignored if yearmonth provided)
-        "skip_existing": false  # optional, whether to skip existing files (default: true)
+        "skip_existing": false,  # optional, whether to skip existing files (default: true)
+        "month_offset": -1  # optional, 0 = current month, -1 = previous month (default: -1)
     }
 
     Output format:
@@ -66,6 +67,7 @@ def handler(event, context):
     skip_existing = event.get(
         "skip_existing", True
     )  # Default to True for backward compatibility
+    month_offset = event.get("month_offset", -1)  # 0 = current month, -1 = previous
 
     # Determine which month to process
     if "yearmonth" in event:
@@ -77,19 +79,22 @@ def handler(event, context):
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
     else:
-        # Calculate previous month from current time or EventBridge time
+        # Calculate target month from current time or EventBridge time
         if "time" in event:
             # EventBridge provides time in ISO format with Z suffix
             now = datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
         else:
             now = datetime.now()
 
-        # Calculate first day of previous month
         first_of_this_month = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
-        last_day_of_last_month = first_of_this_month - timedelta(days=1)
-        first_of_month = last_day_of_last_month.replace(day=1)
+        if month_offset == 0:
+            first_of_month = first_of_this_month
+        else:
+            # month_offset=-1: step back one month
+            last_day_of_last_month = first_of_this_month - timedelta(days=1)
+            first_of_month = last_day_of_last_month.replace(day=1)
 
     # Get number of days in the target month
     year = first_of_month.year

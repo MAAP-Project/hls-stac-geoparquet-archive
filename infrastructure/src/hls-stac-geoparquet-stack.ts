@@ -370,18 +370,24 @@ export class HlsStacGeoparquetStack extends Stack {
       },
     );
 
-    // EventBridge Rules for Monthly Trigger (15th of each month)
-    // Rule for HLSL30 (10:00 AM UTC)
+    // EventBridge Rules — fire every 5 days (days 1, 6, 11, 16, 21, 26 of each month).
+    // Each trigger day runs four executions (staggered by 1 hour each):
+    //   10:00 UTC — HLSL30 previous month (straggler catch)
+    //   11:00 UTC — HLSS30 previous month (straggler catch)
+    //   12:00 UTC — HLSL30 current month (incremental build)
+    //   13:00 UTC — HLSS30 current month (incremental build)
+
+    // Previous-month rules (default month_offset=-1 in month_calculator)
     const hlsl30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSL30", {
       schedule: events.Schedule.cron({
         minute: "0",
         hour: "10",
-        day: "15",
+        day: "*/5",
         month: "*",
         year: "*",
       }),
       description:
-        "Trigger monthly HLS workflow for HLSL30 on 15th of each month",
+        "Trigger HLS workflow for HLSL30 previous month every 5 days",
       enabled: true,
     });
 
@@ -389,23 +395,23 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSL30",
+          month_offset: -1,
           skip_existing: false,
           time: events.EventField.time,
         }),
       }),
     );
 
-    // Rule for HLSS30 (11:00 AM UTC, 1 hour later to avoid overlap)
     const hlss30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSS30", {
       schedule: events.Schedule.cron({
         minute: "0",
         hour: "11",
-        day: "15",
+        day: "*/5",
         month: "*",
         year: "*",
       }),
       description:
-        "Trigger monthly HLS workflow for HLSS30 on 15th of each month",
+        "Trigger HLS workflow for HLSS30 previous month every 5 days",
       enabled: true,
     });
 
@@ -413,6 +419,64 @@ export class HlsStacGeoparquetStack extends Stack {
       new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
         input: events.RuleTargetInput.fromObject({
           collection: "HLSS30",
+          month_offset: -1,
+          skip_existing: false,
+          time: events.EventField.time,
+        }),
+      }),
+    );
+
+    // Current-month rules (month_offset=0 in month_calculator)
+    const hlsl30CurrentMonthRule = new events.Rule(
+      this,
+      "CurrentMonthTriggerHLSL30",
+      {
+        schedule: events.Schedule.cron({
+          minute: "0",
+          hour: "12",
+          day: "*/5",
+          month: "*",
+          year: "*",
+        }),
+        description:
+          "Trigger HLS workflow for HLSL30 current month every 5 days",
+        enabled: true,
+      },
+    );
+
+    hlsl30CurrentMonthRule.addTarget(
+      new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
+        input: events.RuleTargetInput.fromObject({
+          collection: "HLSL30",
+          month_offset: 0,
+          skip_existing: false,
+          time: events.EventField.time,
+        }),
+      }),
+    );
+
+    const hlss30CurrentMonthRule = new events.Rule(
+      this,
+      "CurrentMonthTriggerHLSS30",
+      {
+        schedule: events.Schedule.cron({
+          minute: "0",
+          hour: "13",
+          day: "*/5",
+          month: "*",
+          year: "*",
+        }),
+        description:
+          "Trigger HLS workflow for HLSS30 current month every 5 days",
+        enabled: true,
+      },
+    );
+
+    hlss30CurrentMonthRule.addTarget(
+      new targets.SfnStateMachine(this.monthlyWorkflowStateMachine, {
+        input: events.RuleTargetInput.fromObject({
+          collection: "HLSS30",
+          month_offset: 0,
           skip_existing: false,
           time: events.EventField.time,
         }),
