@@ -75,6 +75,8 @@ def handler(event, context):
         first_of_month = datetime.fromisoformat(
             event["yearmonth"].replace("Z", "+00:00")
         )
+        if first_of_month.tzinfo is None:
+            first_of_month = first_of_month.replace(tzinfo=UTC)
         first_of_month = first_of_month.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )

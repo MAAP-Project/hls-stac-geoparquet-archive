@@ -39,6 +39,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     Returns:
         dict: Response with status, collection, yearmonth, source, and dest
     """
+    event = {k.removesuffix(".$"): v for k, v in event.items()}
     logger.info(f"Write-monthly Lambda invoked with event: {json.dumps(event)}")
 
     try:
