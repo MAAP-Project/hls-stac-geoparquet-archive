@@ -109,7 +109,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         )
         logger.info("Starting async write operation...")
 
-        asyncio.run(
+        total_items_written = asyncio.run(
             write_monthly_stac_geoparquet(
                 collection=collection,
                 yearmonth=yearmonth,
@@ -129,9 +129,10 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             "statusCode": 200,
             "status": "success",
             "collection": collection.value,
-            "yearmonth": yearmonth_str,
+            "yearmonth": f"{yearmonth.year}-{yearmonth.month:02d}",
             "source": source,
             "dest": dest,
+            "total_items_written": total_items_written,
         }
 
     except Exception as e:
