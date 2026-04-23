@@ -73,8 +73,8 @@ Deploy scalable processing infrastructure with AWS CDK:
 - **Month List Generator Lambda**: Generate month list for backfill workflow (128 MB memory, 30s timeout)
 - **Monthly Workflow State Machine**: Orchestrates single month processing (cache-daily → write-monthly)
 - **Backfill Workflow State Machine**: Orchestrates multi-month historical backfill (max 3 months in parallel)
-- **EventBridge Rules**: Automated monthly trigger on 15th of each month (disabled by default)
-- **CloudWatch Alarms**: Monitor Lambda errors, throttles, and Step Functions failures
+- **EventBridge Rules**: Automated trigger every 5 days for both previous-month catch-up and current-month incremental updates (enabled by default)
+- **CloudWatch Alarms**: Monitor Lambda errors and Step Functions timeouts, publishing to the SNS alert topic
 - **Storage**: S3 bucket for cached STAC links
 - **Logging**: CloudWatch logs for all Lambda functions and Step Functions executions
 
@@ -90,10 +90,17 @@ npm run deploy
 
 #### Automated Monthly Workflow (Step Functions)
 
-The Step Functions state machine automatically runs on the 15th of each month (when enabled) to:
-1. Calculate the previous month's date range (or use explicitly specified month)
-2. Cache STAC links for all days in that month (parallel, max 4 concurrent)
-3. Write the monthly GeoParquet file
+The Step Functions state machine runs automatically every 5 days to keep the archive current. Each trigger fires four executions (staggered by one hour):
+
+- 10:00 UTC — HLSL30 previous month (straggler catch-up)
+- 11:00 UTC — HLSS30 previous month (straggler catch-up)
+- 12:00 UTC — HLSL30 current month (incremental build)
+- 13:00 UTC — HLSS30 current month (incremental build)
+
+Each execution:
+1. Calculates the target month's date range
+2. Caches STAC links for all days in that month (parallel, max 4 concurrent)
+3. Writes the monthly GeoParquet file
 
 **Input Parameters:**
 
@@ -133,23 +140,6 @@ EXECUTION_ARN=$(aws stepfunctions list-executions \
 aws stepfunctions describe-execution --execution-arn "$EXECUTION_ARN"
 ```
 
-**Enable Automated Monthly Runs:**
-
-```bash
-# Enable EventBridge rules (one per collection)
-HLSL30_RULE=$(aws cloudformation describe-stacks \
-  --stack-name HlsStacGeoparquetArchive \
-  --query 'Stacks[0].Outputs[?OutputKey==`MonthlyRuleHLSL30`].OutputValue' \
-  --output text)
-
-HLSS30_RULE=$(aws cloudformation describe-stacks \
-  --stack-name HlsStacGeoparquetArchive \
-  --query 'Stacks[0].Outputs[?OutputKey==`MonthlyRuleHLSS30`].OutputValue' \
-  --output text)
-
-aws events enable-rule --name "$HLSL30_RULE"
-aws events enable-rule --name "$HLSS30_RULE"
-```
 
 #### Historical Backfills (Backfill Workflow)
 
@@ -331,9 +321,14 @@ aws logs filter-events \
   --start-time $(date -d '1 hour ago' +%s)000
 ```
 
-#### CloudWatch Alarms
+#### SNS Notifications
 
-Subscribe to alerts for failures:
+The SNS alert topic receives two types of messages:
+
+- **Step Functions notifications**: The monthly workflow publishes a success message (with collection, month, and record count) on completion, and a failure message (with error details) if the write-monthly step fails.
+- **CloudWatch alarm notifications**: Alarms for cache-daily Lambda errors and Step Functions timeouts also publish to the same topic.
+
+Subscribe your email to receive all notifications:
 
 ```bash
 # Get alert topic ARN
@@ -348,7 +343,7 @@ aws sns subscribe \
   --protocol email \
   --notification-endpoint your-email@example.com
 
-# View alarm status
+# View CloudWatch alarm status
 aws cloudwatch describe-alarms --alarm-name-prefix HlsStacGeoparquetArchive
 ```
 
