@@ -429,7 +429,7 @@ export class HlsStacGeoparquetStack extends Stack {
     const hlsl30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSL30", {
       schedule: events.Schedule.cron({
         minute: "0",
-        hour: "10",
+        hour: "5",
         day: "*/5",
         month: "*",
         year: "*",
@@ -453,7 +453,7 @@ export class HlsStacGeoparquetStack extends Stack {
     const hlss30MonthlyRule = new events.Rule(this, "MonthlyTriggerHLSS30", {
       schedule: events.Schedule.cron({
         minute: "0",
-        hour: "11",
+        hour: "6",
         day: "*/5",
         month: "*",
         year: "*",
@@ -481,7 +481,7 @@ export class HlsStacGeoparquetStack extends Stack {
       {
         schedule: events.Schedule.cron({
           minute: "0",
-          hour: "12",
+          hour: "7",
           day: "*/5",
           month: "*",
           year: "*",
@@ -509,7 +509,7 @@ export class HlsStacGeoparquetStack extends Stack {
       {
         schedule: events.Schedule.cron({
           minute: "0",
-          hour: "13",
+          hour: "8",
           day: "*/5",
           month: "*",
           year: "*",
