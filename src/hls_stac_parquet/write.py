@@ -233,14 +233,16 @@ async def write_monthly_stac_geoparquet(
     ] = False,
     batch_size: Annotated[
         int,
-        typer.Argument(help="batch size for writing STAC items to parquet files"),
+        typer.Argument(
+            help="batch size for fetching and writing STAC items to parquet files"
+        ),
     ] = 1000,
 ) -> int:
     """
     Write monthly STAC items to GeoParquet format.
 
-    Collects cached STAC JSON links for a given month, fetches all STAC items,
-    and writes them to a GeoParquet file in object storage.
+    Collects cached STAC JSON links for a given month, fetches STAC items in
+    ordered batches, and writes them to a GeoParquet file in object storage.
 
     Returns:
         Total number of STAC items written to the GeoParquet file (0 if skipped).

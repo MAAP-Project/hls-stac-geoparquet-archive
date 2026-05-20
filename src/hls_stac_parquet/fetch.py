@@ -16,12 +16,15 @@ async def fetch_stac_items(
     max_concurrent: int = 50,
     batch_size: int = 1000,
 ) -> AsyncGenerator[tuple[list[dict[str, Any]], list[ParseResult]]]:
-    """Fetch STAC items in batches and yield them as they become available.
+    """Fetch STAC items in ordered batches.
+
+    Each batch is fetched concurrently with ``asyncio.gather()``, which preserves
+    the input order of links within the batch.
 
     Args:
         stac_links: List of parsed STAC JSON URLs
         max_concurrent: Maximum number of concurrent requests
-        batch_size: Number of items per batch to yield
+        batch_size: Number of items per batch to fetch and yield
 
     Yields:
         Tuple of (batch_items, failed_links) where batch_items is a list of STAC items
@@ -69,30 +72,23 @@ async def fetch_stac_items(
                 return None, link
 
     try:
-        # Execute fetches concurrently and process results as they complete
-        tasks = [fetch_with_error_handling(link) for link in stac_links]
+        for batch_start in range(0, len(stac_links), batch_size):
+            batch_links = stac_links[batch_start : batch_start + batch_size]
+            results = await asyncio.gather(
+                *(fetch_with_error_handling(link) for link in batch_links)
+            )
 
-        batch_items = []
-        batch_failed_links = []
-        completed_count = 0
+            batch_items = []
+            batch_failed_links = []
 
-        # Use as_completed to process results as they arrive
+            for item, failed_link in results:
+                if item is not None:
+                    batch_items.append(item)
+                if failed_link is not None:
+                    batch_failed_links.append(failed_link)
 
-        for coro in asyncio.as_completed(tasks):
-            item, failed_link = await coro
-            completed_count += 1
-
-            if item is not None:
-                batch_items.append(item)
-            if failed_link is not None:
-                batch_failed_links.append(failed_link)
-
-            # Yield when batch is full or all tasks are complete
-            if len(batch_items) >= batch_size or completed_count == len(tasks):
-                if batch_items:  # Only yield if we have items
-                    yield batch_items, batch_failed_links
-                    batch_items = []
-                    batch_failed_links = []
+            if batch_items:
+                yield batch_items, batch_failed_links
 
     finally:
         # Close all credential providers
