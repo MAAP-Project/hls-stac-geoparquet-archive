@@ -245,7 +245,9 @@ WRITE_MONTHLY_FUNCTION=$(aws cloudformation describe-stacks \
   --output text)
 
 # Invoke for a specific month
+# AWS CLI v2 requires --cli-binary-format raw-in-base64-out for inline JSON payloads
 aws lambda invoke \
+  --cli-binary-format raw-in-base64-out \
   --function-name "$WRITE_MONTHLY_FUNCTION" \
   --payload '{"collection": "HLSL30", "yearmonth": "2024-11-01"}' \
   response.json && cat response.json
