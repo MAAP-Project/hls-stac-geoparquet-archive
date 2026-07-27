@@ -2,10 +2,18 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from shutil import copyfile
+from urllib.parse import unquote, urlparse
 
 import pyarrow.parquet as pq
 from pyiceberg.catalog import load_in_memory
+from pyiceberg.io import load_file_io
+from pyiceberg.table import StaticTable
+
+from hls_stac_parquet.constants import (
+    ICEBERG_TABLE_PATH_FORMAT,
+    PARQUET_PATH_FORMAT,
+    HlsCollection,
+)
 
 
 @dataclass(frozen=True)
@@ -13,44 +21,115 @@ class IcebergPublishResult:
     """Locations written by a static Iceberg metadata publication."""
 
     metadata_location: str
-    latest_metadata_path: Path
-    metadata_pointer_path: Path
+    latest_metadata_location: str
+    metadata_pointer_location: str
 
 
-def publish_local_static_iceberg_table(
-    parquet_files: list[Path], table_location: Path, table_name: str = "hls"
+def publish_static_iceberg_table(
+    *, collection: HlsCollection, year: int, month: int, dest: str, version: str
 ) -> IcebergPublishResult:
-    """Publish local parquet files as a static Iceberg table for compatibility tests."""
+    """Publish one collection/month parquet object into static Iceberg metadata."""
+    parquet_location = _join_uri(
+        dest,
+        PARQUET_PATH_FORMAT.format(
+            version=version,
+            collection_id=collection.collection_id,
+            year=year,
+            month=month,
+        ),
+    )
+    table_location = _join_uri(
+        dest,
+        ICEBERG_TABLE_PATH_FORMAT.format(
+            version=version, collection_id=collection.collection_id
+        ),
+    )
+    previous_files = _current_data_files(
+        _join_uri(table_location, "metadata/latest.metadata.json")
+    )
+    parquet_files = [file for file in previous_files if file != parquet_location]
+    parquet_files.append(parquet_location)
+
+    return _publish_static_iceberg_table(
+        parquet_files, table_location, collection.collection_id.replace(".", "_")
+    )
+
+
+def _publish_static_iceberg_table(
+    parquet_files: list[str], table_location: str, table_name: str
+) -> IcebergPublishResult:
     if not parquet_files:
         raise ValueError("at least one parquet file is required")
 
-    missing_files = [path for path in parquet_files if not path.exists()]
+    file_io = load_file_io({}, parquet_files[0])
+    missing_files = [
+        path for path in parquet_files if not file_io.new_input(path).exists()
+    ]
     if missing_files:
         raise FileNotFoundError(missing_files[0])
 
-    table_location.mkdir(parents=True, exist_ok=True)
     schema = pq.read_schema(parquet_files[0])
-
     catalog = load_in_memory(
-        "static",
-        {"warehouse": (table_location.parent / ".pyiceberg-catalog").as_uri()},
+        "static", {"warehouse": _join_uri(table_location, ".pyiceberg-catalog")}
     )
     catalog.create_namespace("default")
     table = catalog.create_table(
-        f"default.{table_name}", schema, location=table_location.as_uri()
+        f"default.{table_name}", schema, location=table_location
     )
-    table.add_files([str(path) for path in parquet_files])
+    table.add_files(parquet_files)
     table = table.refresh()
 
-    metadata_path = Path(table.metadata_location.removeprefix("file://"))
-    latest_metadata_path = table_location / "metadata" / "latest.metadata.json"
-    metadata_pointer_path = table_location / "metadata" / "latest.metadata-location.txt"
+    latest_metadata_location = _join_uri(
+        table_location, "metadata/latest.metadata.json"
+    )
+    metadata_pointer_location = _join_uri(
+        table_location, "metadata/latest.metadata-location.txt"
+    )
+    with (
+        load_file_io({}, table.metadata_location)
+        .new_input(table.metadata_location)
+        .open() as stream
+    ):
+        metadata = stream.read()
 
-    copyfile(metadata_path, latest_metadata_path)
-    metadata_pointer_path.write_text(table.metadata_location)
+    _write_bytes(latest_metadata_location, metadata)
+    _write_bytes(metadata_pointer_location, table.metadata_location.encode())
 
     return IcebergPublishResult(
         metadata_location=table.metadata_location,
-        latest_metadata_path=latest_metadata_path,
-        metadata_pointer_path=metadata_pointer_path,
+        latest_metadata_location=latest_metadata_location,
+        metadata_pointer_location=metadata_pointer_location,
     )
+
+
+def _current_data_files(metadata_location: str) -> list[str]:
+    io = load_file_io({}, metadata_location)
+    if not io.new_input(metadata_location).exists():
+        return []
+
+    table = StaticTable.from_metadata(metadata_location)
+    snapshot = table.current_snapshot()
+    if snapshot is None:
+        return []
+
+    return [
+        entry.data_file.file_path
+        for manifest in snapshot.manifests(table.io)
+        for entry in manifest.fetch_manifest_entry(table.io)
+    ]
+
+
+def _write_bytes(location: str, data: bytes) -> None:
+    io = load_file_io({}, location)
+    with io.new_output(location).create(overwrite=True) as stream:
+        stream.write(data)
+
+
+def _join_uri(base: str, path: str) -> str:
+    parsed = urlparse(base)
+    if parsed.scheme == "file":
+        joined = (Path(unquote(parsed.path)) / path).resolve()
+        return f"file://{joined}"
+    if parsed.scheme:
+        return f"{base.rstrip('/')}/{path.lstrip('/')}"
+    return f"file://{(Path(base) / path).resolve()}"
