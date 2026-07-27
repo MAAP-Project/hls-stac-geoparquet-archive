@@ -4,10 +4,12 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
 from hls_stac_parquet.cmr_api import HlsCollection
+from hls_stac_parquet.iceberg import publish_static_iceberg_table
 from hls_stac_parquet.write import write_monthly_stac_geoparquet
 
 logger = logging.getLogger(__name__)
@@ -20,7 +22,8 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     Lambda handler for write-monthly operations.
 
     This handler invokes the write_monthly_stac_geoparquet function to create
-    monthly GeoParquet files from cached STAC JSON links.
+    monthly GeoParquet files from cached STAC JSON links, then publishes static
+    Iceberg metadata for the same collection/month.
 
     Expected event format (JSON):
     {
@@ -125,6 +128,18 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
 
         logger.info("Successfully completed write-monthly operation")
 
+        logger.info(
+            f"Publishing static Iceberg metadata for {collection.value} {yearmonth.year}-{yearmonth.month:02d}"
+        )
+        iceberg_result = publish_static_iceberg_table(
+            collection=collection,
+            year=yearmonth.year,
+            month=yearmonth.month,
+            dest=dest,
+            version=version,
+        )
+        logger.info("Successfully published static Iceberg metadata")
+
         # Return success response
         return {
             "statusCode": 200,
@@ -134,6 +149,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             "source": source,
             "dest": dest,
             "total_items_written": total_items_written,
+            "iceberg": asdict(iceberg_result),
         }
 
     except Exception as e:
