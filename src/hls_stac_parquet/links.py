@@ -8,7 +8,7 @@ from urllib.parse import ParseResult
 
 import obstore
 import typer
-from obstore.store import ObjectStore, from_url
+from obstore.store import ObjectStore
 
 from hls_stac_parquet.cmr_api import (
     HlsCollection,
@@ -17,6 +17,7 @@ from hls_stac_parquet.cmr_api import (
     extract_stac_json_links,
 )
 from hls_stac_parquet.constants import LINK_PATH_FORMAT
+from hls_stac_parquet.storage import store_from_url
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -89,7 +90,7 @@ async def cache_daily_stac_json_links(
     Queries CMR for HLS STAC items on a specific date and writes the
     STAC JSON links to object storage for later retrieval.
     """
-    store = from_url(dest)
+    store = store_from_url(dest)
     out_path = LINK_PATH_FORMAT.format(
         collection_id=collection.collection_id,
         year=date.year,

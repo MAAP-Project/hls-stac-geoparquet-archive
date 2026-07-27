@@ -85,6 +85,27 @@ def test_static_iceberg_metadata_reads_original_hive_partitioned_files(tmp_path)
     assert file_b.exists()
 
 
+def test_static_iceberg_metadata_handles_list_columns(tmp_path):
+    parquet_root = tmp_path / "v2" / "HLSL30_2.0"
+    parquet_file = parquet_root / "year=2025" / "month=1" / "a.parquet"
+    parquet_file.parent.mkdir(parents=True, exist_ok=True)
+    duckdb.sql(
+        f"""
+        COPY (
+            SELECT 'a' AS id, ['eo', 'proj'] AS stac_extensions
+        ) TO '{parquet_file}' (FORMAT PARQUET)
+        """
+    )
+
+    result = iceberg._publish_static_iceberg_table(
+        [_file_uri(parquet_file)],
+        _file_uri(parquet_root / "iceberg"),
+        "hls",
+    )
+
+    assert _query_iceberg_ids(result.latest_metadata_location) == ["a"]
+
+
 def test_missing_parquet_file_does_not_advance_stable_metadata(tmp_path):
     table_location = tmp_path / "v2" / "HLSL30_2.0" / "iceberg"
 

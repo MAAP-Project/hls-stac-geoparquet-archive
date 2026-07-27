@@ -6,6 +6,7 @@ from urllib.parse import unquote, urlparse
 
 import pyarrow.parquet as pq
 from pyiceberg.catalog import load_in_memory
+from pyiceberg.io import pyarrow as pyiceberg_pyarrow
 from pyiceberg.io import load_file_io
 from pyiceberg.table import StaticTable
 
@@ -14,6 +15,9 @@ from hls_stac_parquet.constants import (
     PARQUET_PATH_FORMAT,
     HlsCollection,
 )
+from hls_stac_parquet.storage import pyiceberg_s3_properties
+
+_LIST_ITEM_PATH_PATCHED = False
 
 
 @dataclass(frozen=True)
@@ -61,7 +65,7 @@ def _publish_static_iceberg_table(
     if not parquet_files:
         raise ValueError("at least one parquet file is required")
 
-    file_io = load_file_io({}, parquet_files[0])
+    file_io = _file_io(parquet_files[0])
     missing_files = [
         path for path in parquet_files if not file_io.new_input(path).exists()
     ]
@@ -70,12 +74,20 @@ def _publish_static_iceberg_table(
 
     schema = pq.read_schema(parquet_files[0])
     catalog = load_in_memory(
-        "static", {"warehouse": _join_uri(table_location, ".pyiceberg-catalog")}
+        "static",
+        {
+            "warehouse": _join_uri(table_location, ".pyiceberg-catalog"),
+            **pyiceberg_s3_properties(),
+        },
     )
     catalog.create_namespace("default")
     table = catalog.create_table(
-        f"default.{table_name}", schema, location=table_location
+        f"default.{table_name}",
+        schema,
+        location=table_location,
+        properties={"write.metadata.metrics.default": "none"},
     )
+    _patch_pyiceberg_list_item_paths()
     table.add_files(parquet_files)
     table = table.refresh()
 
@@ -86,7 +98,7 @@ def _publish_static_iceberg_table(
         table_location, "metadata/latest.metadata-location.txt"
     )
     with (
-        load_file_io({}, table.metadata_location)
+        _file_io(table.metadata_location)
         .new_input(table.metadata_location)
         .open() as stream
     ):
@@ -103,11 +115,11 @@ def _publish_static_iceberg_table(
 
 
 def _current_data_files(metadata_location: str) -> list[str]:
-    io = load_file_io({}, metadata_location)
+    io = _file_io(metadata_location)
     if not io.new_input(metadata_location).exists():
         return []
 
-    table = StaticTable.from_metadata(metadata_location)
+    table = StaticTable.from_metadata(metadata_location, pyiceberg_s3_properties())
     snapshot = table.current_snapshot()
     if snapshot is None:
         return []
@@ -119,10 +131,34 @@ def _current_data_files(metadata_location: str) -> list[str]:
     ]
 
 
+def _patch_pyiceberg_list_item_paths() -> None:
+    global _LIST_ITEM_PATH_PATCHED
+    if _LIST_ITEM_PATH_PATCHED:
+        return
+
+    original = pyiceberg_pyarrow.parquet_path_to_id_mapping
+
+    def patched(schema):
+        mapping = original(schema)
+        mapping.update(
+            (path.replace(".list.element", ".list.item"), field_id)
+            for path, field_id in list(mapping.items())
+            if ".list.element" in path
+        )
+        return mapping
+
+    pyiceberg_pyarrow.parquet_path_to_id_mapping = patched
+    _LIST_ITEM_PATH_PATCHED = True
+
+
 def _write_bytes(location: str, data: bytes) -> None:
-    io = load_file_io({}, location)
+    io = _file_io(location)
     with io.new_output(location).create(overwrite=True) as stream:
         stream.write(data)
+
+
+def _file_io(location: str):
+    return load_file_io(pyiceberg_s3_properties(), location)
 
 
 def _join_uri(base: str, path: str) -> str:
