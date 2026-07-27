@@ -17,6 +17,9 @@ services:
       /bin/sh -c "
       until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done &&
       mc mb --ignore-existing local/hls-local &&
-      printf '%s' '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::hls-local/*"]}]}' > /tmp/hls-local-public-read.json &&
-      mc anonymous set-json /tmp/hls-local-public-read.json local/hls-local
+      mc anonymous set download local/hls-local &&
+      mc admin user add local hlsreadonly hlsreadonly || true &&
+      printf '%s' '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::hls-local/*\"]}]}' > /tmp/hls-readonly.json &&
+      mc admin policy create local hls-readonly /tmp/hls-readonly.json || true &&
+      mc admin policy attach local hls-readonly --user hlsreadonly
       "

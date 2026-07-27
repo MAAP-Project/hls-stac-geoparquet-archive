@@ -26,7 +26,6 @@ class IcebergPublishResult:
 
     metadata_location: str
     latest_metadata_location: str
-    metadata_pointer_location: str
 
 
 def publish_static_iceberg_table(
@@ -94,9 +93,6 @@ def _publish_static_iceberg_table(
     latest_metadata_location = _join_uri(
         table_location, "metadata/latest.metadata.json"
     )
-    metadata_pointer_location = _join_uri(
-        table_location, "metadata/latest.metadata-location.txt"
-    )
     with (
         _file_io(table.metadata_location)
         .new_input(table.metadata_location)
@@ -105,12 +101,10 @@ def _publish_static_iceberg_table(
         metadata = stream.read()
 
     _write_bytes(latest_metadata_location, metadata)
-    _write_bytes(metadata_pointer_location, table.metadata_location.encode())
 
     return IcebergPublishResult(
         metadata_location=table.metadata_location,
         latest_metadata_location=latest_metadata_location,
-        metadata_pointer_location=metadata_pointer_location,
     )
 
 

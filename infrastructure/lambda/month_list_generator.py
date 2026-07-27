@@ -20,7 +20,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     Lambda handler for generating a list of year-months for backfill.
 
     This function generates an array of month objects that can be used by a
-    Step Functions Map state to process each month in parallel.
+    Step Functions Map state to process each month sequentially.
 
     Expected event format (JSON):
     {

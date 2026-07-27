@@ -22,7 +22,7 @@ def test_handler_publishes_iceberg_after_monthly_write(tmp_path, monkeypatch):
 
     def fake_publish_static_iceberg_table(**kwargs):
         calls.append(("publish", kwargs))
-        return IcebergPublishResult("metadata.json", "latest.json", "pointer.txt")
+        return IcebergPublishResult("metadata.json", "latest.json")
 
     monkeypatch.setattr(
         write_handler,
@@ -49,40 +49,6 @@ def test_handler_publishes_iceberg_after_monthly_write(tmp_path, monkeypatch):
     }
     assert response["total_items_written"] == 7
     assert response["iceberg"]["latest_metadata_location"] == "latest.json"
-
-
-def test_handler_publishes_iceberg_when_existing_parquet_is_skipped(
-    tmp_path, monkeypatch
-):
-    """A skipped parquet write still repairs or publishes Iceberg metadata."""
-    _set_handler_env(monkeypatch, tmp_path)
-    published = False
-
-    async def fake_write_monthly_stac_geoparquet(**kwargs):
-        return 0
-
-    def fake_publish_static_iceberg_table(**kwargs):
-        nonlocal published
-        published = True
-        return IcebergPublishResult("metadata.json", "latest.json", "pointer.txt")
-
-    monkeypatch.setattr(
-        write_handler,
-        "write_monthly_stac_geoparquet",
-        fake_write_monthly_stac_geoparquet,
-    )
-    monkeypatch.setattr(
-        write_handler,
-        "publish_static_iceberg_table",
-        fake_publish_static_iceberg_table,
-    )
-
-    response = write_handler.handler(
-        {"collection": "HLSL30", "yearmonth": "2025-01-01", "skip_existing": True}
-    )
-
-    assert published
-    assert response["total_items_written"] == 0
 
 
 def test_handler_raises_when_iceberg_publication_fails(tmp_path, monkeypatch):

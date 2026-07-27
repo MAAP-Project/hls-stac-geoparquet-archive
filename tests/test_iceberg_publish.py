@@ -77,10 +77,6 @@ def test_static_iceberg_metadata_reads_original_hive_partitioned_files(tmp_path)
         "a",
         "b",
     ]
-    assert (
-        _path_from_file_uri(result.metadata_pointer_location).read_text()
-        == result.metadata_location
-    )
     assert file_a.exists()
     assert file_b.exists()
 
@@ -115,7 +111,6 @@ def test_missing_parquet_file_does_not_advance_stable_metadata(tmp_path):
         )
 
     assert not (table_location / "metadata" / "latest.metadata.json").exists()
-    assert not (table_location / "metadata" / "latest.metadata-location.txt").exists()
 
 
 def test_publisher_writes_collection_metadata_without_touching_parquet(tmp_path):
@@ -203,8 +198,6 @@ def test_failed_latest_metadata_write_does_not_advance_stable_entry(
         version="v2",
     )
     stable_metadata = _path_from_file_uri(first.latest_metadata_location).read_bytes()
-    stable_pointer = _path_from_file_uri(first.metadata_pointer_location).read_text()
-
     original_write_bytes = iceberg._write_bytes
 
     def fail_latest_metadata(location: str, data: bytes) -> None:
@@ -227,10 +220,6 @@ def test_failed_latest_metadata_write_does_not_advance_stable_entry(
     assert (
         _path_from_file_uri(first.latest_metadata_location).read_bytes()
         == stable_metadata
-    )
-    assert (
-        _path_from_file_uri(first.metadata_pointer_location).read_text()
-        == stable_pointer
     )
 
 

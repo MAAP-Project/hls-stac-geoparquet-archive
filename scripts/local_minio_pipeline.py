@@ -23,24 +23,22 @@ def _set_minio_env(endpoint: str) -> None:
     os.environ.setdefault("AWS_ENDPOINT_URL", endpoint)
 
 
-def _duckdb_iceberg_sql(metadata_location: str, endpoint: str) -> str:
+def _duckdb_count(
+    metadata_location: str, endpoint: str, access_key_id: str, secret_access_key: str
+) -> int:
     endpoint_host = endpoint.removeprefix("http://").removeprefix("https://")
     use_ssl = "true" if endpoint.startswith("https://") else "false"
-    return f"""INSTALL httpfs;
+    sql = f"""INSTALL httpfs;
 LOAD httpfs;
 INSTALL iceberg;
 LOAD iceberg;
 SET s3_region='us-east-1';
-SET s3_access_key_id='minioadmin';
-SET s3_secret_access_key='minioadmin';
+SET s3_access_key_id='{access_key_id}';
+SET s3_secret_access_key='{secret_access_key}';
 SET s3_endpoint='{endpoint_host}';
 SET s3_url_style='path';
 SET s3_use_ssl={use_ssl};
 SELECT count(*) FROM iceberg_scan('{metadata_location}');"""
-
-
-def _duckdb_count(metadata_location: str, endpoint: str) -> int:
-    sql = _duckdb_iceberg_sql(metadata_location, endpoint)
     logger.info("DuckDB SQL for local Iceberg read:\n%s", sql)
     return duckdb.connect().sql(sql).fetchone()[0]
 
@@ -82,16 +80,22 @@ async def _run(args: argparse.Namespace) -> None:
         version=args.version,
     )
 
-    count = _duckdb_count(result.latest_metadata_location, args.endpoint)
+    count = _duckdb_count(
+        result.latest_metadata_location,
+        args.endpoint,
+        args.read_access_key_id,
+        args.read_secret_access_key,
+    )
     logger.info("DuckDB read %s rows from %s", count, result.latest_metadata_location)
-    print(result.latest_metadata_location)
-    print(f"rows={count}; written={total}")
+    logger.info("rows=%s; written=%s", count, total)
 
 
 def main() -> None:
     """Parse arguments and run the local MinIO pipeline."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-existing", action="store_true")
+    parser.add_argument("--read-access-key-id", default="hlsreadonly")
+    parser.add_argument("--read-secret-access-key", default="hlsreadonly")
     parser.set_defaults(
         endpoint="http://localhost:9000",
         bucket="hls-local",

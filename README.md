@@ -27,7 +27,7 @@ uv run python scripts/local_minio_pipeline.py
 
 MinIO console: <http://localhost:9001> (`minioadmin` / `minioadmin`). The test bucket is `hls-local`; local compose grants anonymous `GetObject` access without anonymous bucket listing so the DuckDB Iceberg read uses public object URLs.
 
-The script logs the plain DuckDB SQL needed for the local Iceberg metadata read:
+The script logs the plain DuckDB SQL needed for the local Iceberg metadata read. It uses a MinIO user with only `s3:GetObject`, not bucket listing:
 
 ```sql
 INSTALL httpfs;
@@ -35,8 +35,8 @@ LOAD httpfs;
 INSTALL iceberg;
 LOAD iceberg;
 SET s3_region='us-east-1';
-SET s3_access_key_id='minioadmin';
-SET s3_secret_access_key='minioadmin';
+SET s3_access_key_id='hlsreadonly';
+SET s3_secret_access_key='hlsreadonly';
 SET s3_endpoint='localhost:9000';
 SET s3_url_style='path';
 SET s3_use_ssl=false;
@@ -64,18 +64,17 @@ uv run hls-stac-parquet cache-daily-stac-json-links HLSS30 2024-01-15 s3://bucke
 Read cached links and write monthly GeoParquet files. The deployed Lambda also publishes static Iceberg metadata after each monthly write.
 
 ```bash
-uv run hls-stac-parquet write-monthly-stac-geoparquet HLSL30 2024-01 s3://bucket/data
+uv run hls-stac-parquet write-monthly-stac-geoparquet HLSL30 2024-01-01 s3://bucket/links s3://bucket/data v2
 
-# Optional: version output and control validation
-uv run hls-stac-parquet write-monthly-stac-geoparquet HLSS30 2024-01 s3://bucket/data \
-  --version v0.1.0 \
+# Optional: control validation
+uv run hls-stac-parquet write-monthly-stac-geoparquet HLSS30 2024-01-01 s3://bucket/links s3://bucket/data v2 \
   --no-require-complete-links
 ```
 
 Publish or repair Iceberg metadata for an existing monthly parquet file:
 
 ```bash
-uv run hls-stac-parquet publish-static-iceberg-table HLSL30 2024 1 s3://bucket/data --version v2
+uv run hls-stac-parquet publish-static-iceberg-table HLSL30 2024 1 s3://bucket/data v2
 ```
 
 ### Collections
@@ -109,7 +108,7 @@ Deploy scalable processing infrastructure with AWS CDK:
 - **Month Calculator Lambda**: Generate dates array for Step Functions (128 MB memory, 30s timeout)
 - **Month List Generator Lambda**: Generate month list for backfill workflow (128 MB memory, 30s timeout)
 - **Monthly Workflow State Machine**: Orchestrates single month processing (cache-daily → write-monthly)
-- **Backfill Workflow State Machine**: Orchestrates multi-month historical backfill (max 3 months in parallel)
+- **Backfill Workflow State Machine**: Orchestrates multi-month historical backfill sequentially so static Iceberg metadata is not updated concurrently for a collection
 - **EventBridge Rules**: Automated trigger every 5 days for both previous-month catch-up and current-month incremental updates (enabled by default)
 - **CloudWatch Alarms**: Monitor Lambda errors and Step Functions timeouts, publishing to the SNS alert topic
 - **Storage**: S3 bucket for cached STAC links
@@ -181,17 +180,17 @@ aws stepfunctions describe-execution --execution-arn "$EXECUTION_ARN"
 
 #### Historical Backfills (Backfill Workflow)
 
-> **WARNING:** The backfill workflow will query NASA's CMR API very heavily. It processes multiple months in parallel, with each month making ~30 CMR requests. Use responsibly and consider rate limiting for large historical backfills.
+> **WARNING:** The backfill workflow queries NASA's CMR API for each month in the requested range. Use responsibly for large historical backfills.
 
 The backfill workflow is a parent Step Functions state machine that orchestrates the complete historical rebuild:
 
 1. **Generate month list**: Calculate all year-months to process for a date range
-2. **Process months in parallel**: Invoke the monthly workflow for each month (max 3 concurrent)
-3. **Each monthly workflow**: Cache all days (max 4 concurrent) → Write monthly GeoParquet
+2. **Process months sequentially**: Invoke the monthly workflow for each month, one at a time, so Iceberg table metadata is updated safely
+3. **Each monthly workflow**: Cache all days (max 4 concurrent) → Write monthly GeoParquet → Publish Iceberg metadata
 
 **Advantages over manual batch processing:**
 - Infrastructure-managed, no long-running scripts
-- Built-in concurrency control to protect upstream API
+- Built-in sequential month processing to avoid concurrent Iceberg metadata writes
 - Automatic retries and error handling
 - Progress tracking in Step Functions console
 - Can process entire collection history in one command
@@ -244,9 +243,9 @@ aws logs tail /aws/vendedlogs/states/hls-backfill-workflow --follow
 ```
 
 **Concurrency Settings:**
-- **Backfill workflow**: Processes 3 months concurrently
+- **Backfill workflow**: Processes 1 month at a time because static Iceberg metadata publication is read-modify-write per collection
 - **Monthly workflow**: Processes 4 days concurrently per month
-- **Total concurrent CMR requests**: ~12 (3 months × 4 days)
+- **Total concurrent CMR requests**: ~4 (1 month × 4 days)
 - **write-monthly Lambda**: No concurrency limit (processes as many months as needed)
 
 #### Manual Single-Month Processing

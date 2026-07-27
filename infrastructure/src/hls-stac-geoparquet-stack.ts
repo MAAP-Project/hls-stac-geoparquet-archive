@@ -338,7 +338,8 @@ export class HlsStacGeoparquetStack extends Stack {
     );
 
     // Parent Backfill Workflow State Machine
-    // This workflow processes multiple months in parallel with controlled concurrency
+    // This workflow processes months sequentially so one collection's static Iceberg metadata
+    // is never updated concurrently by this workflow.
     // WARNING: This will generate many cache-daily Lambda invocations and query CMR API heavily
 
     // Step 1: Generate list of months to process
@@ -352,12 +353,12 @@ export class HlsStacGeoparquetStack extends Stack {
       },
     );
 
-    // Step 2: Map state to process all months in parallel with controlled concurrency
+    // Step 2: Map state to process months sequentially
     const processAllMonths = new sfn.Map(this, "ProcessAllMonths", {
       itemsPath: "$.months",
-      maxConcurrency: 3, // Process 3 months at a time
+      maxConcurrency: 1, // Static Iceberg metadata publication is read-modify-write per collection
       resultPath: "$.monthResults",
-      comment: "Process monthly workflow for each month in parallel",
+      comment: "Process monthly workflow for each month sequentially",
     });
 
     // Invoke the monthly workflow for each month
@@ -405,7 +406,7 @@ export class HlsStacGeoparquetStack extends Stack {
         definitionBody: sfn.DefinitionBody.fromChainable(backfillDefinition),
         timeout: Duration.hours(48), // Allow up to 48 hours for large backfills
         comment:
-          "Orchestrates historical backfill by processing multiple months in parallel",
+          "Orchestrates historical backfill by processing months sequentially",
         tracingEnabled: true,
         logs: {
           destination: new logs.LogGroup(this, "BackfillStateMachineLogGroup", {
@@ -718,7 +719,7 @@ export class HlsStacGeoparquetStack extends Stack {
         "'",
       ].join(" \\\n  "),
       description:
-        "Example commands to run backfill workflow (processes multiple months in parallel)",
+        "Example commands to run backfill workflow (processes months sequentially)",
     });
 
     new CfnOutput(this, "CrossAccountBucketPolicyExample", {
