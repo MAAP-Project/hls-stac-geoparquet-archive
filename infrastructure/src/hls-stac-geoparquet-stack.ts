@@ -221,14 +221,14 @@ export class HlsStacGeoparquetStack extends Stack {
     // Configure the Map iterator
     cacheAllDays.itemProcessor(cacheDailyTask);
 
-    // Step 3: Write monthly parquet
+    // Step 3: Write monthly parquet and publish static Iceberg metadata
     // Note: STAC JSON links are read from SOURCE env var
-    // GeoParquet files are written to DEST env var
+    // GeoParquet and Iceberg metadata files are written to DEST env var
     const writeMonthly = new tasks.LambdaInvoke(this, "WriteMonthly", {
       lambdaFunction: this.writeMonthlyFunction,
       payload: sfn.TaskInput.fromObject({
         "collection.$": "$.collection",
-        "yearmonth.$": sfn.JsonPath.format(
+        yearmonth: sfn.JsonPath.format(
           "{}-01",
           sfn.JsonPath.stringAt("$.yearMonth"),
         ),
@@ -236,7 +236,7 @@ export class HlsStacGeoparquetStack extends Stack {
         "skip_existing.$": "$.skip_existing",
       }),
       outputPath: "$.Payload",
-      comment: "Write monthly GeoParquet file",
+      comment: "Write monthly GeoParquet file and publish static Iceberg metadata",
     });
 
     // Add retry logic to write-monthly step
@@ -258,7 +258,7 @@ export class HlsStacGeoparquetStack extends Stack {
       cause: "Monthly workflow failed during execution",
     });
 
-    // Notify success via SNS with collection, month, and record count
+    // Notify success via SNS with collection, month, record count, and Iceberg metadata location
     // At this point outputPath: "$.Payload" has replaced state with the Lambda response,
     // so $.collection, $.yearmonth, and $.total_items_written are all available.
     const notifySuccess = new tasks.SnsPublish(this, "NotifySuccess", {
@@ -270,10 +270,11 @@ export class HlsStacGeoparquetStack extends Stack {
       ),
       message: sfn.TaskInput.fromText(
         sfn.JsonPath.format(
-          "The HLS STAC GeoParquet Archive for {} ({}) was updated and now contains {} records.",
+          "The HLS STAC GeoParquet Archive for {} ({}) was updated and now contains {} records. Iceberg metadata: {}",
           sfn.JsonPath.stringAt("$.yearmonth"),
           sfn.JsonPath.stringAt("$.collection"),
           sfn.JsonPath.stringAt("$.total_items_written"),
+          sfn.JsonPath.stringAt("$.iceberg.latest_metadata_location"),
         ),
       ),
       resultPath: sfn.JsonPath.DISCARD,
@@ -322,7 +323,7 @@ export class HlsStacGeoparquetStack extends Stack {
       {
         definitionBody: sfn.DefinitionBody.fromChainable(definition),
         timeout: Duration.hours(1),
-        comment: "Orchestrates monthly cache-daily → write-monthly workflow",
+        comment: "Orchestrates monthly cache-daily → write-monthly plus static Iceberg publication workflow",
         tracingEnabled: true,
         logs: {
           destination: new logs.LogGroup(this, "StateMachineLogGroup", {
@@ -337,7 +338,8 @@ export class HlsStacGeoparquetStack extends Stack {
     );
 
     // Parent Backfill Workflow State Machine
-    // This workflow processes multiple months in parallel with controlled concurrency
+    // This workflow processes months sequentially so one collection's static Iceberg metadata
+    // is never updated concurrently by this workflow.
     // WARNING: This will generate many cache-daily Lambda invocations and query CMR API heavily
 
     // Step 1: Generate list of months to process
@@ -351,12 +353,12 @@ export class HlsStacGeoparquetStack extends Stack {
       },
     );
 
-    // Step 2: Map state to process all months in parallel with controlled concurrency
+    // Step 2: Map state to process months sequentially
     const processAllMonths = new sfn.Map(this, "ProcessAllMonths", {
       itemsPath: "$.months",
-      maxConcurrency: 3, // Process 3 months at a time
+      maxConcurrency: 1, // Static Iceberg metadata publication is read-modify-write per collection
       resultPath: "$.monthResults",
-      comment: "Process monthly workflow for each month in parallel",
+      comment: "Process monthly workflow for each month sequentially",
     });
 
     // Invoke the monthly workflow for each month
@@ -404,7 +406,7 @@ export class HlsStacGeoparquetStack extends Stack {
         definitionBody: sfn.DefinitionBody.fromChainable(backfillDefinition),
         timeout: Duration.hours(48), // Allow up to 48 hours for large backfills
         comment:
-          "Orchestrates historical backfill by processing multiple months in parallel",
+          "Orchestrates historical backfill by processing months sequentially",
         tracingEnabled: true,
         logs: {
           destination: new logs.LogGroup(this, "BackfillStateMachineLogGroup", {
@@ -717,7 +719,7 @@ export class HlsStacGeoparquetStack extends Stack {
         "'",
       ].join(" \\\n  "),
       description:
-        "Example commands to run backfill workflow (processes multiple months in parallel)",
+        "Example commands to run backfill workflow (processes months sequentially)",
     });
 
     new CfnOutput(this, "CrossAccountBucketPolicyExample", {

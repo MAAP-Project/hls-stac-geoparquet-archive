@@ -6,6 +6,7 @@ TEST = "test"
 LINK_PATH_PREFIX = "links/{collection_id}/{year}/{month:02d}"
 LINK_PATH_FORMAT = LINK_PATH_PREFIX + "/{year}-{month:02d}-{day:02d}.json"
 PARQUET_PATH_FORMAT = "{version}/{collection_id}/year={year}/month={month}/{collection_id}-{year}-{month}.parquet"
+ICEBERG_TABLE_PATH_FORMAT = "{version}/{collection_id}/iceberg"
 
 # Collection-specific origin dates (when data starts being available)
 COLLECTION_ORIGIN_DATES = {

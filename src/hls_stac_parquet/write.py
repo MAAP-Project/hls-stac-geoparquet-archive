@@ -15,7 +15,6 @@ import obstore
 import typer
 from hilbertcurve.hilbertcurve import HilbertCurve
 from mgrs import MGRS
-from obstore.store import from_url
 from rustac.geoparquet import geoparquet_writer
 from rustac.rustac import GeoparquetWriter
 
@@ -26,6 +25,7 @@ from hls_stac_parquet.constants import (
     PARQUET_PATH_FORMAT,
 )
 from hls_stac_parquet.fetch import fetch_stac_items
+from hls_stac_parquet.storage import store_from_url
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -247,8 +247,8 @@ async def write_monthly_stac_geoparquet(
     Returns:
         Total number of STAC items written to the GeoParquet file (0 if skipped).
     """
-    source_store = from_url(source)
-    dest_store = from_url(dest)
+    source_store = store_from_url(source)
+    dest_store = store_from_url(dest)
 
     year = yearmonth.year
     month = yearmonth.month
