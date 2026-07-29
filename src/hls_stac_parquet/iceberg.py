@@ -84,7 +84,10 @@ def _publish_static_iceberg_table(
         f"default.{table_name}",
         schema,
         location=table_location,
-        properties={"write.metadata.metrics.default": "none"},
+        properties={
+            "write.metadata.metrics.default": "none",
+            "write.metadata.metrics.column.datetime": "full",
+        },
     )
     _patch_pyiceberg_list_item_paths()
     table.add_files(parquet_files)
