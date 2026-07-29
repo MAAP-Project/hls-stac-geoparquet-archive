@@ -253,19 +253,12 @@ def test_failed_latest_metadata_write_does_not_advance_stable_entry(
     )
 
 
-def test_publishing_newer_month_preserves_earlier_month(tmp_path):
+def test_publisher_discovers_existing_months_without_prior_metadata(tmp_path):
     january = _monthly_parquet_path(tmp_path, HlsCollection.HLSL30, 2025, 1)
     february = _monthly_parquet_path(tmp_path, HlsCollection.HLSL30, 2025, 2)
     _write_parquet(january, [("jan",)])
     _write_parquet(february, [("feb",)])
 
-    publish_static_iceberg_table(
-        collection=HlsCollection.HLSL30,
-        year=2025,
-        month=1,
-        dest=tmp_path.as_uri(),
-        version="v2",
-    )
     result = publish_static_iceberg_table(
         collection=HlsCollection.HLSL30,
         year=2025,
