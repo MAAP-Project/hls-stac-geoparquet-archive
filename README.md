@@ -103,7 +103,7 @@ Deploy scalable processing infrastructure with AWS CDK:
 ### Architecture
 
 **Serverless Lambda + Step Functions:**
-- **Cache Daily Lambda**: Lightweight CMR queries (1024 MB memory, 300s timeout, max 4 concurrent)
+- **Cache Daily Lambda**: Container-image Lambda for CMR queries (1024 MB memory, 300s timeout, max 4 concurrent)
 - **Write Monthly Lambda**: Container-image Lambda that writes monthly GeoParquet files (8192 MB memory, 15min timeout, no concurrency limit)
 - **Month Calculator Lambda**: Generate dates array for Step Functions (128 MB memory, 30s timeout)
 - **Month List Generator Lambda**: Generate month list for backfill workflow (128 MB memory, 30s timeout)

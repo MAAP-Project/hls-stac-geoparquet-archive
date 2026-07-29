@@ -66,16 +66,18 @@ export class HlsStacGeoparquetStack extends Stack {
     // Create the lambda function
     const maxConcurrency = 12;
     const lambdaRuntime = lambda.Runtime.PYTHON_3_13;
-    this.cacheDailyFunction = new lambda.Function(this, "CacheDailyFunction", {
-      runtime: lambdaRuntime,
-      handler: "hls_stac_parquet.handler.handler",
-      code: lambda.Code.fromDockerBuild(path.join(__dirname, "../../"), {
-        file: "Dockerfile",
-        platform: "linux/amd64",
-        buildArgs: {
-          PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
-        },
-      }),
+    this.cacheDailyFunction = new lambda.DockerImageFunction(
+      this,
+      "CacheDailyFunction",
+      {
+        code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, "../../"), {
+          file: "Dockerfile",
+          platform: ecrAssets.Platform.LINUX_AMD64,
+          cmd: ["hls_stac_parquet.handler.handler"],
+          buildArgs: {
+            PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
+          },
+        }),
       memorySize: 1024,
       timeout: Duration.seconds(300),
       reservedConcurrentExecutions: maxConcurrency,
@@ -102,7 +104,7 @@ export class HlsStacGeoparquetStack extends Stack {
       "WriteMonthlyFunction",
       {
         code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, "../../"), {
-          file: "Dockerfile.write-monthly",
+          file: "Dockerfile",
           platform: ecrAssets.Platform.LINUX_AMD64,
           buildArgs: {
             PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
