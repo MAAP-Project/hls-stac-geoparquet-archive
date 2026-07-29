@@ -10,6 +10,7 @@ import {
   aws_cloudwatch_actions as cloudwatch_actions,
   aws_events as events,
   aws_events_targets as targets,
+  aws_ecr_assets as ecrAssets,
   aws_lambda as lambda,
   aws_logs as logs,
   aws_s3 as s3,
@@ -96,15 +97,13 @@ export class HlsStacGeoparquetStack extends Stack {
       ? `s3://${props.destBucket}/${props.destPath}`
       : `s3://${props.destBucket}`;
 
-    this.writeMonthlyFunction = new lambda.Function(
+    this.writeMonthlyFunction = new lambda.DockerImageFunction(
       this,
       "WriteMonthlyFunction",
       {
-        runtime: lambdaRuntime,
-        handler: "hls_stac_parquet.write_handler.handler",
-        code: lambda.Code.fromDockerBuild(path.join(__dirname, "../../"), {
-          file: "Dockerfile",
-          platform: "linux/amd64",
+        code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, "../../"), {
+          file: "Dockerfile.write-monthly",
+          platform: ecrAssets.Platform.LINUX_AMD64,
           buildArgs: {
             PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
           },
