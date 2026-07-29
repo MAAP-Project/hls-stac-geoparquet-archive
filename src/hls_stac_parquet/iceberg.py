@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 from pyiceberg.catalog import load_in_memory
 from pyiceberg.io import pyarrow as pyiceberg_pyarrow
@@ -68,7 +69,7 @@ def _publish_static_iceberg_table(
     if missing_files:
         raise FileNotFoundError(missing_files[0])
 
-    schema = pq.read_schema(parquet_files[0])
+    schema = _canonical_schema(parquet_files)
     catalog = load_in_memory(
         "static",
         {
@@ -105,6 +106,29 @@ def _publish_static_iceberg_table(
     return IcebergPublishResult(
         metadata_location=table.metadata_location,
         latest_metadata_location=latest_metadata_location,
+    )
+
+
+def _canonical_schema(parquet_files: list[str]) -> pa.Schema:
+    return pa.unify_schemas(
+        [_normalize_dictionary_fields(pq.read_schema(path)) for path in parquet_files]
+    )
+
+
+def _normalize_dictionary_fields(schema: pa.Schema) -> pa.Schema:
+    return pa.schema(
+        [
+            pa.field(
+                field.name,
+                field.type.value_type
+                if pa.types.is_dictionary(field.type)
+                else field.type,
+                nullable=field.nullable,
+                metadata=field.metadata,
+            )
+            for field in schema
+        ],
+        metadata=schema.metadata,
     )
 
 

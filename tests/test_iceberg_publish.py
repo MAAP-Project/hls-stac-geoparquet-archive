@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from pyiceberg.table import StaticTable
 
@@ -109,6 +111,40 @@ def test_static_iceberg_metadata_includes_datetime_bounds_for_file_pruning(tmp_p
         entry.data_file.lower_bounds[datetime_field_id]
         < entry.data_file.upper_bounds[datetime_field_id]
     )
+
+
+def test_static_iceberg_metadata_unifies_optional_columns_and_dictionary_strings(
+    tmp_path,
+):
+    """Files with optional STAC fields produce one readable table."""
+    old_file = tmp_path / "year=2020" / "month=10" / "old.parquet"
+    new_file = tmp_path / "year=2026" / "month=6" / "new.parquet"
+    old_file.parent.mkdir(parents=True, exist_ok=True)
+    new_file.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.table({"id": ["old"], "stac_version": ["1.0.0"]}), old_file)
+    pq.write_table(
+        pa.table(
+            {
+                "id": ["new"],
+                "stac_version": pa.array(["1.0.0"]).dictionary_encode(),
+                "proj:shape": [[1, 2]],
+                "proj:transform": [[30.0, 0.0]],
+                "processing:software": pa.StructArray.from_arrays(
+                    [pa.array(["x"]), pa.array(["y"])],
+                    names=["Atmospheric Correction", "Cloud Masking"],
+                ),
+            }
+        ),
+        new_file,
+    )
+
+    result = iceberg._publish_static_iceberg_table(
+        [_file_uri(old_file), _file_uri(new_file)],
+        _file_uri(tmp_path / "iceberg"),
+        "hls",
+    )
+
+    assert _query_iceberg_ids(result.latest_metadata_location) == ["new", "old"]
 
 
 def test_static_iceberg_metadata_handles_list_columns(tmp_path):
