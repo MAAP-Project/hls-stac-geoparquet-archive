@@ -729,6 +729,15 @@ export class HlsStacGeoparquetStack extends Stack {
           Version: "2012-10-17",
           Statement: [
             {
+              Sid: "AllowHLSStackListAccess",
+              Effect: "Allow",
+              Principal: {
+                AWS: this.writeMonthlyFunction.role!.roleArn,
+              },
+              Action: "s3:ListBucket",
+              Resource: "arn:aws:s3:::YOUR-CROSS-ACCOUNT-BUCKET",
+            },
+            {
               Sid: "AllowHLSStackWriteAccess",
               Effect: "Allow",
               Principal: {

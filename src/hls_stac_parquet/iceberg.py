@@ -8,14 +8,13 @@ import pyarrow.parquet as pq
 from pyiceberg.catalog import load_in_memory
 from pyiceberg.io import pyarrow as pyiceberg_pyarrow
 from pyiceberg.io import load_file_io
-from pyiceberg.table import StaticTable
 
 from hls_stac_parquet.constants import (
     ICEBERG_TABLE_PATH_FORMAT,
     PARQUET_PATH_FORMAT,
     HlsCollection,
 )
-from hls_stac_parquet.storage import pyiceberg_s3_properties
+from hls_stac_parquet.storage import pyiceberg_s3_properties, store_from_url
 
 _LIST_ITEM_PATH_PATCHED = False
 
@@ -47,11 +46,9 @@ def publish_static_iceberg_table(
             version=version, collection_id=collection.collection_id
         ),
     )
-    previous_files = _current_data_files(
-        _join_uri(table_location, "metadata/latest.metadata.json")
-    )
-    parquet_files = [file for file in previous_files if file != parquet_location]
-    parquet_files.append(parquet_location)
+    parquet_files = _collection_parquet_files(dest, version, collection.collection_id)
+    if parquet_location not in parquet_files:
+        raise FileNotFoundError(parquet_location)
 
     return _publish_static_iceberg_table(
         parquet_files, table_location, collection.collection_id.replace(".", "_")
@@ -111,21 +108,15 @@ def _publish_static_iceberg_table(
     )
 
 
-def _current_data_files(metadata_location: str) -> list[str]:
-    io = _file_io(metadata_location)
-    if not io.new_input(metadata_location).exists():
-        return []
-
-    table = StaticTable.from_metadata(metadata_location, pyiceberg_s3_properties())
-    snapshot = table.current_snapshot()
-    if snapshot is None:
-        return []
-
-    return [
-        entry.data_file.file_path
-        for manifest in snapshot.manifests(table.io)
-        for entry in manifest.fetch_manifest_entry(table.io)
-    ]
+def _collection_parquet_files(dest: str, version: str, collection_id: str) -> list[str]:
+    prefix = f"{version}/{collection_id}/"
+    return sorted(
+        _join_uri(dest, result["path"])
+        for batch in store_from_url(dest).list(prefix)
+        for result in batch
+        if result["path"].startswith(f"{prefix}year=")
+        and result["path"].endswith(".parquet")
+    )
 
 
 def _patch_pyiceberg_list_item_paths() -> None:
