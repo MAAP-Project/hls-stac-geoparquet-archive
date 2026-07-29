@@ -81,6 +81,36 @@ def test_static_iceberg_metadata_reads_original_hive_partitioned_files(tmp_path)
     assert file_b.exists()
 
 
+def test_static_iceberg_metadata_includes_datetime_bounds_for_file_pruning(tmp_path):
+    """The manifest has datetime bounds for temporal file pruning."""
+    parquet_file = tmp_path / "year=2025" / "month=1" / "data.parquet"
+    parquet_file.parent.mkdir(parents=True, exist_ok=True)
+    duckdb.sql(
+        f"""
+        COPY (
+            SELECT TIMESTAMP '2025-01-01 00:00:00' AS datetime
+            UNION ALL
+            SELECT TIMESTAMP '2025-01-31 23:59:59' AS datetime
+        ) TO '{parquet_file}' (FORMAT PARQUET)
+        """
+    )
+
+    result = iceberg._publish_static_iceberg_table(
+        [_file_uri(parquet_file)], _file_uri(tmp_path / "iceberg"), "hls"
+    )
+
+    table = StaticTable.from_metadata(result.metadata_location)
+    snapshot = table.current_snapshot()
+    assert snapshot is not None
+    entry = snapshot.manifests(table.io)[0].fetch_manifest_entry(table.io)[0]
+    datetime_field_id = table.schema().find_field("datetime").field_id
+
+    assert (
+        entry.data_file.lower_bounds[datetime_field_id]
+        < entry.data_file.upper_bounds[datetime_field_id]
+    )
+
+
 def test_static_iceberg_metadata_handles_list_columns(tmp_path):
     parquet_root = tmp_path / "v2" / "HLSL30_2.0"
     parquet_file = parquet_root / "year=2025" / "month=1" / "a.parquet"
