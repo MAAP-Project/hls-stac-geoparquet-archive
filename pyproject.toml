@@ -1,6 +1,6 @@
 [project]
 name = "hls-stac-parquet"
-version = "0.2.0"
+version = "0.3.0"
 description = "Generate a STAC GeoParquet archive from the HLS STAC records"
 readme = "README.md"
 authors = [
