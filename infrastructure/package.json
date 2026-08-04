@@ -1,6 +1,6 @@
 {
   "name": "hls-stac-geoparquet-archive",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "description": "AWS CDK app for generating a STAC Geoparquet archive of HLS granules",
   "main": "lib/app.js",
   "scripts": {
