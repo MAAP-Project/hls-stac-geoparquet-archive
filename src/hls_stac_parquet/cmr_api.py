@@ -1,6 +1,7 @@
 """CMR query functions for HLS data."""
 
-from typing import Any, AsyncGenerator, Dict, List
+from collections.abc import AsyncGenerator
+from typing import Any
 from urllib.parse import ParseResult, urlparse
 
 import httpx
@@ -42,7 +43,7 @@ def create_hls_query(
 
 async def get_cmr_results_async(
     query: GranuleQuery, page_size: int = 2000
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """Async generator that yields CMR granule results.
 
     Args:
@@ -72,8 +73,8 @@ async def get_cmr_results_async(
 
 
 def extract_stac_json_links(
-    results: List[Dict[str, Any]], protocol: str = "https"
-) -> List[ParseResult]:
+    results: list[dict[str, Any]], protocol: str = "https"
+) -> list[ParseResult]:
     """Extract STAC JSON links from CMR results.
 
     Args:
@@ -107,7 +108,7 @@ def extract_stac_json_links(
 
 async def collect_cmr_results(
     query: GranuleQuery, page_size: int = 2000
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Collect all CMR results into a list.
 
     Args:

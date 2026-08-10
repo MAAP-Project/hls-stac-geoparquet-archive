@@ -7,8 +7,8 @@ from urllib.parse import unquote, urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 from pyiceberg.catalog import load_in_memory
-from pyiceberg.io import pyarrow as pyiceberg_pyarrow
 from pyiceberg.io import load_file_io
+from pyiceberg.io import pyarrow as pyiceberg_pyarrow
 
 from hls_stac_parquet.constants import (
     ICEBERG_TABLE_PATH_FORMAT,

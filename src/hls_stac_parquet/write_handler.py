@@ -152,10 +152,9 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
             "iceberg": asdict(iceberg_result),
         }
 
-    except Exception as e:
-        logger.error(
-            f"Write-monthly operation failed: {str(e)}",
-            exc_info=True,
+    except Exception:
+        logger.exception(
+            "Write-monthly operation failed:",
         )
         # Re-raise the exception so Step Functions sees it as a failure
         # This allows Step Functions retry logic to work properly

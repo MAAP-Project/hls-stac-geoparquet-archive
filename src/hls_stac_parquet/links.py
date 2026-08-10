@@ -2,8 +2,8 @@
 
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Annotated, List, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Literal
 from urllib.parse import ParseResult
 
 import obstore
@@ -39,7 +39,7 @@ async def collect_stac_json_links(
     bounding_box: tuple[float, float, float, float] | None = None,
     temporal: tuple[str, str] | None = None,
     protocol: Literal["s3", "https"] = "https",
-) -> List[ParseResult]:
+) -> list[ParseResult]:
     query = create_hls_query(
         collection=collection,
         bounding_box=bounding_box,
@@ -52,7 +52,7 @@ async def collect_stac_json_links(
 
 
 async def write_stac_links(
-    stac_links: List[ParseResult],
+    stac_links: list[ParseResult],
     store: ObjectStore,
     path: str,
 ) -> None:
@@ -98,12 +98,13 @@ async def cache_daily_stac_json_links(
         day=date.day,
     )
 
-    if skip_existing:
-        if await _check_exists(store, out_path):
-            logger.info(f"{dest}/{out_path} already exists ... skipping")
-            return
+    if skip_existing and await _check_exists(store, out_path):
+        logger.info(f"{dest}/{out_path} already exists ... skipping")
+        return
 
-    start_datetime = datetime(year=date.year, month=date.month, day=date.day)
+    start_datetime = datetime(
+        year=date.year, month=date.month, day=date.day, tzinfo=UTC
+    )
     end_datetime = start_datetime + timedelta(days=1) - timedelta(seconds=1)
 
     stac_links = await collect_stac_json_links(
