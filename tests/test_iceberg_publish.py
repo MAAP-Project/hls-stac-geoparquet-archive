@@ -6,7 +6,7 @@ import pyarrow.parquet as pq
 import pytest
 from pyiceberg.table import StaticTable
 
-import hls_stac_parquet.iceberg as iceberg
+from hls_stac_parquet import iceberg
 from hls_stac_parquet.constants import PARQUET_PATH_FORMAT, HlsCollection
 from hls_stac_parquet.iceberg import publish_static_iceberg_table
 

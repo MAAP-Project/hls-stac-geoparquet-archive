@@ -1,6 +1,6 @@
 import pytest
 
-import hls_stac_parquet.write_handler as write_handler
+from hls_stac_parquet import write_handler
 from hls_stac_parquet.constants import HlsCollection
 from hls_stac_parquet.iceberg import IcebergPublishResult
 
