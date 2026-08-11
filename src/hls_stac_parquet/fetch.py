@@ -2,7 +2,8 @@
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Dict, List
+from collections.abc import AsyncGenerator
+from typing import Any
 from urllib.parse import ParseResult
 
 import obstore as obs
@@ -11,7 +12,7 @@ from obstore.store import from_url
 
 
 async def fetch_stac_items(
-    stac_links: List[ParseResult],
+    stac_links: list[ParseResult],
     collection_id: str,
     max_concurrent: int = 50,
     batch_size: int = 1000,
@@ -57,7 +58,7 @@ async def fetch_stac_items(
 
     async def fetch_with_error_handling(
         link: ParseResult,
-    ) -> tuple[Dict[str, Any] | None, ParseResult | None]:
+    ) -> tuple[dict[str, Any] | None, ParseResult | None]:
         async with semaphore:
             try:
                 store = stores_by_netloc[link.netloc]

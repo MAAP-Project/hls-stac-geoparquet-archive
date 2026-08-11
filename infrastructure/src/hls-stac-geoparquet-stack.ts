@@ -10,6 +10,7 @@ import {
   aws_cloudwatch_actions as cloudwatch_actions,
   aws_events as events,
   aws_events_targets as targets,
+  aws_ecr_assets as ecrAssets,
   aws_lambda as lambda,
   aws_logs as logs,
   aws_s3 as s3,
@@ -65,16 +66,18 @@ export class HlsStacGeoparquetStack extends Stack {
     // Create the lambda function
     const maxConcurrency = 12;
     const lambdaRuntime = lambda.Runtime.PYTHON_3_13;
-    this.cacheDailyFunction = new lambda.Function(this, "CacheDailyFunction", {
-      runtime: lambdaRuntime,
-      handler: "hls_stac_parquet.handler.handler",
-      code: lambda.Code.fromDockerBuild(path.join(__dirname, "../../"), {
-        file: "Dockerfile",
-        platform: "linux/amd64",
-        buildArgs: {
-          PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
-        },
-      }),
+    this.cacheDailyFunction = new lambda.DockerImageFunction(
+      this,
+      "CacheDailyFunction",
+      {
+        code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, "../../"), {
+          file: "Dockerfile",
+          platform: ecrAssets.Platform.LINUX_AMD64,
+          cmd: ["hls_stac_parquet.handler.handler"],
+          buildArgs: {
+            PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
+          },
+        }),
       memorySize: 1024,
       timeout: Duration.seconds(300),
       reservedConcurrentExecutions: maxConcurrency,
@@ -96,15 +99,13 @@ export class HlsStacGeoparquetStack extends Stack {
       ? `s3://${props.destBucket}/${props.destPath}`
       : `s3://${props.destBucket}`;
 
-    this.writeMonthlyFunction = new lambda.Function(
+    this.writeMonthlyFunction = new lambda.DockerImageFunction(
       this,
       "WriteMonthlyFunction",
       {
-        runtime: lambdaRuntime,
-        handler: "hls_stac_parquet.write_handler.handler",
-        code: lambda.Code.fromDockerBuild(path.join(__dirname, "../../"), {
+        code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, "../../"), {
           file: "Dockerfile",
-          platform: "linux/amd64",
+          platform: ecrAssets.Platform.LINUX_AMD64,
           buildArgs: {
             PYTHON_VERSION: lambdaRuntime.toString().replace("python", ""),
           },
@@ -221,14 +222,14 @@ export class HlsStacGeoparquetStack extends Stack {
     // Configure the Map iterator
     cacheAllDays.itemProcessor(cacheDailyTask);
 
-    // Step 3: Write monthly parquet
+    // Step 3: Write monthly parquet and publish static Iceberg metadata
     // Note: STAC JSON links are read from SOURCE env var
-    // GeoParquet files are written to DEST env var
+    // GeoParquet and Iceberg metadata files are written to DEST env var
     const writeMonthly = new tasks.LambdaInvoke(this, "WriteMonthly", {
       lambdaFunction: this.writeMonthlyFunction,
       payload: sfn.TaskInput.fromObject({
         "collection.$": "$.collection",
-        "yearmonth.$": sfn.JsonPath.format(
+        yearmonth: sfn.JsonPath.format(
           "{}-01",
           sfn.JsonPath.stringAt("$.yearMonth"),
         ),
@@ -236,7 +237,7 @@ export class HlsStacGeoparquetStack extends Stack {
         "skip_existing.$": "$.skip_existing",
       }),
       outputPath: "$.Payload",
-      comment: "Write monthly GeoParquet file",
+      comment: "Write monthly GeoParquet file and publish static Iceberg metadata",
     });
 
     // Add retry logic to write-monthly step
@@ -258,7 +259,7 @@ export class HlsStacGeoparquetStack extends Stack {
       cause: "Monthly workflow failed during execution",
     });
 
-    // Notify success via SNS with collection, month, and record count
+    // Notify success via SNS with collection, month, record count, and Iceberg metadata location
     // At this point outputPath: "$.Payload" has replaced state with the Lambda response,
     // so $.collection, $.yearmonth, and $.total_items_written are all available.
     const notifySuccess = new tasks.SnsPublish(this, "NotifySuccess", {
@@ -270,10 +271,11 @@ export class HlsStacGeoparquetStack extends Stack {
       ),
       message: sfn.TaskInput.fromText(
         sfn.JsonPath.format(
-          "The HLS STAC GeoParquet Archive for {} ({}) was updated and now contains {} records.",
+          "The HLS STAC GeoParquet Archive for {} ({}) was updated and now contains {} records. Iceberg metadata: {}",
           sfn.JsonPath.stringAt("$.yearmonth"),
           sfn.JsonPath.stringAt("$.collection"),
           sfn.JsonPath.stringAt("$.total_items_written"),
+          sfn.JsonPath.stringAt("$.iceberg.latest_metadata_location"),
         ),
       ),
       resultPath: sfn.JsonPath.DISCARD,
@@ -322,7 +324,7 @@ export class HlsStacGeoparquetStack extends Stack {
       {
         definitionBody: sfn.DefinitionBody.fromChainable(definition),
         timeout: Duration.hours(1),
-        comment: "Orchestrates monthly cache-daily → write-monthly workflow",
+        comment: "Orchestrates monthly cache-daily → write-monthly plus static Iceberg publication workflow",
         tracingEnabled: true,
         logs: {
           destination: new logs.LogGroup(this, "StateMachineLogGroup", {
@@ -337,7 +339,8 @@ export class HlsStacGeoparquetStack extends Stack {
     );
 
     // Parent Backfill Workflow State Machine
-    // This workflow processes multiple months in parallel with controlled concurrency
+    // This workflow processes months sequentially so one collection's static Iceberg metadata
+    // is never updated concurrently by this workflow.
     // WARNING: This will generate many cache-daily Lambda invocations and query CMR API heavily
 
     // Step 1: Generate list of months to process
@@ -351,12 +354,12 @@ export class HlsStacGeoparquetStack extends Stack {
       },
     );
 
-    // Step 2: Map state to process all months in parallel with controlled concurrency
+    // Step 2: Map state to process months sequentially
     const processAllMonths = new sfn.Map(this, "ProcessAllMonths", {
       itemsPath: "$.months",
-      maxConcurrency: 3, // Process 3 months at a time
+      maxConcurrency: 1, // Static Iceberg metadata publication is read-modify-write per collection
       resultPath: "$.monthResults",
-      comment: "Process monthly workflow for each month in parallel",
+      comment: "Process monthly workflow for each month sequentially",
     });
 
     // Invoke the monthly workflow for each month
@@ -404,7 +407,7 @@ export class HlsStacGeoparquetStack extends Stack {
         definitionBody: sfn.DefinitionBody.fromChainable(backfillDefinition),
         timeout: Duration.hours(48), // Allow up to 48 hours for large backfills
         comment:
-          "Orchestrates historical backfill by processing multiple months in parallel",
+          "Orchestrates historical backfill by processing months sequentially",
         tracingEnabled: true,
         logs: {
           destination: new logs.LogGroup(this, "BackfillStateMachineLogGroup", {
@@ -717,7 +720,7 @@ export class HlsStacGeoparquetStack extends Stack {
         "'",
       ].join(" \\\n  "),
       description:
-        "Example commands to run backfill workflow (processes multiple months in parallel)",
+        "Example commands to run backfill workflow (processes months sequentially)",
     });
 
     new CfnOutput(this, "CrossAccountBucketPolicyExample", {
@@ -725,6 +728,15 @@ export class HlsStacGeoparquetStack extends Stack {
         {
           Version: "2012-10-17",
           Statement: [
+            {
+              Sid: "AllowHLSStackListAccess",
+              Effect: "Allow",
+              Principal: {
+                AWS: this.writeMonthlyFunction.role!.roleArn,
+              },
+              Action: "s3:ListBucket",
+              Resource: "arn:aws:s3:::YOUR-CROSS-ACCOUNT-BUCKET",
+            },
             {
               Sid: "AllowHLSStackWriteAccess",
               Effect: "Allow",

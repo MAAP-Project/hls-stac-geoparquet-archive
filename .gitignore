@@ -14,3 +14,6 @@ infrastructure/node_modules/
 infrastructure/cdk.out/
 
 docs/.ipynb_checkpoints/
+
+issue-drafts/
+dev-docs/plans/

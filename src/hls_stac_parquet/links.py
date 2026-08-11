@@ -2,13 +2,13 @@
 
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Annotated, List, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Literal
 from urllib.parse import ParseResult
 
 import obstore
 import typer
-from obstore.store import ObjectStore, from_url
+from obstore.store import ObjectStore
 
 from hls_stac_parquet.cmr_api import (
     HlsCollection,
@@ -17,6 +17,7 @@ from hls_stac_parquet.cmr_api import (
     extract_stac_json_links,
 )
 from hls_stac_parquet.constants import LINK_PATH_FORMAT
+from hls_stac_parquet.storage import store_from_url
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -38,7 +39,7 @@ async def collect_stac_json_links(
     bounding_box: tuple[float, float, float, float] | None = None,
     temporal: tuple[str, str] | None = None,
     protocol: Literal["s3", "https"] = "https",
-) -> List[ParseResult]:
+) -> list[ParseResult]:
     query = create_hls_query(
         collection=collection,
         bounding_box=bounding_box,
@@ -51,7 +52,7 @@ async def collect_stac_json_links(
 
 
 async def write_stac_links(
-    stac_links: List[ParseResult],
+    stac_links: list[ParseResult],
     store: ObjectStore,
     path: str,
 ) -> None:
@@ -89,7 +90,7 @@ async def cache_daily_stac_json_links(
     Queries CMR for HLS STAC items on a specific date and writes the
     STAC JSON links to object storage for later retrieval.
     """
-    store = from_url(dest)
+    store = store_from_url(dest)
     out_path = LINK_PATH_FORMAT.format(
         collection_id=collection.collection_id,
         year=date.year,
@@ -97,12 +98,13 @@ async def cache_daily_stac_json_links(
         day=date.day,
     )
 
-    if skip_existing:
-        if await _check_exists(store, out_path):
-            logger.info(f"{dest}/{out_path} already exists ... skipping")
-            return
+    if skip_existing and await _check_exists(store, out_path):
+        logger.info(f"{dest}/{out_path} already exists ... skipping")
+        return
 
-    start_datetime = datetime(year=date.year, month=date.month, day=date.day)
+    start_datetime = datetime(
+        year=date.year, month=date.month, day=date.day, tzinfo=UTC
+    )
     end_datetime = start_datetime + timedelta(days=1) - timedelta(seconds=1)
 
     stac_links = await collect_stac_json_links(

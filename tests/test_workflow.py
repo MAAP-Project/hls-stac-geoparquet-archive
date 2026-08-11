@@ -2,12 +2,15 @@ import json
 from datetime import datetime
 from tempfile import TemporaryDirectory
 
+import duckdb
 import obstore
 import pytest
 from obstore.store import MemoryStore, from_url
+from typer.testing import CliRunner
 
+from hls_stac_parquet.cli import app
 from hls_stac_parquet.cmr_api import HlsCollection
-from hls_stac_parquet.constants import LINK_PATH_FORMAT
+from hls_stac_parquet.constants import LINK_PATH_FORMAT, PARQUET_PATH_FORMAT
 from hls_stac_parquet.links import (
     _check_exists,
     cache_daily_stac_json_links,
@@ -17,6 +20,34 @@ from hls_stac_parquet.links import (
 from hls_stac_parquet.write import write_monthly_stac_geoparquet
 
 TEST_BOUNDING_BOX = (-93, 46, -92, 47)
+
+
+def test_publish_static_iceberg_table_cli_uses_real_publisher(tmp_path):
+    parquet_path = tmp_path / PARQUET_PATH_FORMAT.format(
+        version="v2",
+        collection_id=HlsCollection.HLSL30.collection_id,
+        year=2025,
+        month=1,
+    )
+    parquet_path.parent.mkdir(parents=True)
+    duckdb.sql(f"COPY (SELECT 'a' AS id) TO '{parquet_path}' (FORMAT PARQUET)")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "publish-static-iceberg-table",
+            "HLSL30",
+            "2025",
+            "1",
+            tmp_path.as_uri(),
+            "v2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        tmp_path / "v2" / "HLSL30_2.0" / "iceberg" / "metadata" / "latest.metadata.json"
+    ).exists()
 
 
 @pytest.mark.vcr
