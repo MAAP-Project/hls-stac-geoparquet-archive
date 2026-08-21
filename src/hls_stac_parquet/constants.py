@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 
 CLIENT_ID = "nasa-maap-hls-stac-geoparquet; contact henry@developmentseed.org"
@@ -10,8 +10,8 @@ ICEBERG_TABLE_PATH_FORMAT = "{version}/{collection_id}/iceberg"
 
 # Collection-specific origin dates (when data starts being available)
 COLLECTION_ORIGIN_DATES = {
-    "HLSL30": datetime(2013, 4, 11, tzinfo=UTC),  # Landsat 8 launch + HLS processing start
-    "HLSS30": datetime(2015, 11, 28, tzinfo=UTC),  # Sentinel-2A launch + HLS processing start
+    "HLSL30": datetime(2013, 4, 11),  # Landsat 8 launch + HLS processing start
+    "HLSS30": datetime(2015, 11, 28),  # Sentinel-2A launch + HLS processing start
 }
 
 COLLECTION_CONCEPT_IDS = {
