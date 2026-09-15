@@ -1,20 +1,25 @@
 # Configuration file for pre-commit (https://pre-commit.com/).
-# Please run `pre-commit run --all-files` when adding or changing entries.
+# Please run `uv run pre-commit run --all-files` when adding or changing entries.
 
 repos:
-  - repo: https://github.com/tsvikas/sync-with-uv
-    rev: v0.5.0
-    hooks:
-      - id: sync-with-uv
-
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.2.0
     hooks:
       - id: mypy
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.0
+  # Use the Ruff version in uv.lock instead of maintaining a second pin.
+  - repo: local
     hooks:
       - id: ruff
+        name: ruff check
+        entry: uv run --locked ruff check --force-exclude
+        language: unsupported
+        types_or: [python, pyi, jupyter]
         args: [ --fix ]
+        require_serial: true
       - id: ruff-format
+        name: ruff format
+        entry: uv run --locked ruff format --force-exclude
+        language: unsupported
+        types_or: [python, pyi, jupyter]
+        require_serial: true
