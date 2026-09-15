@@ -14,7 +14,14 @@ git clone https://github.com/MAAP-project/hls-stac-parquet.git
 cd hls-stac-parquet
 
 uv sync
+uv run pre-commit install
+uv run pre-commit run --all-files
 ```
+
+Ruff hooks run through `uv run --locked`, so Dependabot updates their version through
+`uv.lock` without a separate hook pin. Mypy remains an isolated pre-commit hook,
+updated by Dependabot's `pre-commit` configuration. Keep `uv` on your `PATH` when
+committing.
 
 ### Local MinIO pipeline check
 
