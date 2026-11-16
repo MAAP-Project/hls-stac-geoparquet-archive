@@ -112,7 +112,7 @@ class: sql-walkthrough
 
 # Direct scan: exact January Parquet key
 
-```sql {1-13|2-8|9-10|11-12|1,13|1-13}
+```sql {1-12|2-8|9-10|11-12|1|1-12}
 SELECT count(*) AS items
 FROM read_parquet(
   's3://nasa-maap-data-store/' ||
