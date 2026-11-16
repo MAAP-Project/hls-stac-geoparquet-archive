@@ -29,13 +29,13 @@ To view the deck inside the documentation site:
 ```bash
 uv sync
 pnpm build
-uv run python scripts/check-slide-site.py
+uv run python scripts/check-slide-site.py --browser google-chrome
 python -m http.server --directory build 8000
 ```
 
-Open <http://localhost:8000/> for the site or <http://localhost:8000/presentations/esdis-tech-spotlight-2026-11-17/> for the deck. `pnpm build` generates Slidev files under `docs/presentations/esdis-tech-spotlight-2026-11-17/`, then MkDocs copies them to `build/`. Relative asset URLs work locally and under the GitHub Pages project prefix. Check that prefix with `uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive`.
+Open <http://localhost:8000/> for the site or <http://localhost:8000/presentations/esdis-tech-spotlight-2026-11-17/> for the deck. `pnpm build` generates Slidev files under `docs/presentations/esdis-tech-spotlight-2026-11-17/`, then MkDocs copies them to `build/`. Slidev needs an explicit router base for its mount path. The default build targets localhost; for Pages, run `SITE_PREFIX=/hls-stac-geoparquet-archive pnpm build`, then `uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive --browser google-chrome`. Rebuild without `SITE_PREFIX` before returning to the local preview. The browser check requires Chrome or Chromium (pass its executable name); omitting `--browser` checks only HTTP links/assets, not rendered slides.
 
-**Note:** The default local build uses `mkdocs.offline.yml` to render saved notebook outputs without executing cloud queries. It does not validate archive access. Pages uses `MKDOCS_CONFIG=mkdocs.yml pnpm build`, which executes the notebook and requires cloud access. Plain `uv run mkdocs build` or `serve` does not rebuild the slides; run `pnpm build:slides` first if using those commands directly.
+**Note:** The default local build uses `mkdocs.offline.yml` to render saved notebook outputs without executing cloud queries. It does not validate archive access. Pages uses `MKDOCS_CONFIG=mkdocs.yml SITE_PREFIX=/hls-stac-geoparquet-archive pnpm build`, which executes the notebook and requires cloud access. Plain `uv run mkdocs build` or `serve` does not rebuild the slides; run `pnpm build:slides` first if using those commands directly.
 
 ```bash
 git clone https://github.com/MAAP-project/hls-stac-parquet.git

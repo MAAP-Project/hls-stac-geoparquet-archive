@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
+import subprocess
 import threading
 from functools import partial
 from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urljoin, urlsplit
 from urllib.request import urlopen
 
@@ -60,6 +63,10 @@ def main() -> None:
         "--prefix",
         default="",
         help="GitHub Pages project prefix, e.g. /hls-stac-geoparquet-archive",
+    )
+    parser.add_argument(
+        "--browser",
+        help="Chrome/Chromium executable for checking that the first slide renders",
     )
     args = parser.parse_args()
     prefix = args.prefix.rstrip("/")
@@ -125,6 +132,31 @@ def main() -> None:
                 if response.status != 200:
                     raise AssertionError(f"asset request failed: {asset_url}")
                 response.read()
+        if args.browser:
+            with TemporaryDirectory(prefix="slidev-browser-") as profile:
+                result = subprocess.run(
+                    [
+                        args.browser,
+                        "--headless=new",
+                        "--no-sandbox",
+                        "--disable-gpu",
+                        "--no-first-run",
+                        f"--user-data-dir={profile}",
+                        "--virtual-time-budget=5000",
+                        "--dump-dom",
+                        deck_url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=45,
+                )
+                if not re.search(r'class="[^"]*\bslidev-page-1\b', result.stdout):
+                    raise AssertionError(
+                        f"First slide did not render at {deck_url}; "
+                        "check the Slidev router base path"
+                    )
+            logging.info("Browser rendered the first slide at %s", deck_url)
         logging.info(
             "OK: %s -> %s; fetched %d deck assets", landing_url, deck_url, len(assets)
         )

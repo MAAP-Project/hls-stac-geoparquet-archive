@@ -5,7 +5,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "slidev slides/slides.md",
-    "build:slides": "slidev build slides/slides.md --out ../docs/presentations/esdis-tech-spotlight-2026-11-17 --base ./",
+    "build:slides": "bash scripts/build-slides.sh",
     "build": "./scripts/build-docs-and-slides.sh"
   },
   "dependencies": {
