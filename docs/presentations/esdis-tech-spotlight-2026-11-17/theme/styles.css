@@ -55,7 +55,23 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 400;
 }
 
-.slidev-layout h1 { color: var(--maap-heading); }
+.slidev-layout h1 {
+  color: var(--maap-heading);
+  font-size: 2.5rem;
+  line-height: 1.15;
+  margin: 0 0 1.25rem;
+}
+
+.slidev-layout h2 {
+  font-size: 1.75rem;
+  line-height: 1.2;
+  margin-bottom: 0.75rem;
+}
+
+.slidev-layout.cover h1 {
+  font-size: 3.5rem;
+  line-height: 1.1;
+}
 .slidev-layout h2,
 .slidev-layout a,
 .slidev-layout :not(pre) > code { color: var(--maap-accent); }

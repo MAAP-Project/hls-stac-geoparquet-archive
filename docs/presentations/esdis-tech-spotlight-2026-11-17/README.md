@@ -8,7 +8,7 @@ The colors are sourced from `src/css/custom.css` in [MAAP-Project/maap-website](
 
 ## Light and dark mode
 
-The theme follows Slidev's built-in light/dark toggle (`html.dark`). Semantic variables in `theme/styles.css` control text, headings, links, muted notes, and card backgrounds in both modes. The cover keeps its dark MAAP gradient in either mode. Use `text-muted` for secondary text rather than a fixed gray utility.
+The theme follows Slidev's built-in light/dark toggle (`html.dark`). Semantic variables in `theme/styles.css` control text, headings, links, muted notes, and card backgrounds in both modes. Slide titles use 2.5rem text with space below, section headings use 1.75rem, and the cover title uses 3.5rem. The cover keeps its dark MAAP gradient in either mode. Use `text-muted` for secondary text rather than a fixed gray utility.
 
 `theme/setup/shiki.ts` selects Shiki's GitHub light/dark palettes; code backgrounds match those palettes. Inline code uses the theme accent without overriding highlighted code tokens. When changing colors, check both modes, including the pipeline and SQL slides.
 
