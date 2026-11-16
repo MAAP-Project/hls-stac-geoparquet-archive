@@ -102,21 +102,22 @@ CREATE SECRET anon_s3 (
 The direct query reads the exact monthly object. The Iceberg query follows only the published metadata file to locate data objects.
 
 ---
-layout: two-cols
+layout: two-cols-header
+layoutClass: query-results
 ---
 
-# Same filter, two access paths
+# Direct scan: exact monthly Parquet key
 
 ::left::
-
-## Exact Parquet object
 
 ```sql
 SELECT count(*) AS items
 FROM read_parquet(
-  's3://nasa-maap-data-store/file-staging/nasa-map/' ||
-  'hls-stac-geoparquet-archive/v2/HLSL30_2.0/' ||
-  'year=2024/month=1/HLSL30_2.0-2024-1.parquet'
+  's3://nasa-maap-data-store/' ||
+  'file-staging/nasa-map/' ||
+  'hls-stac-geoparquet-archive/v2/' ||
+  'HLSL30_2.0/year=2024/month=1/' ||
+  'HLSL30_2.0-2024-1.parquet'
 )
 WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
   AND datetime < TIMESTAMPTZ '2024-02-01 00:00:00+00'
@@ -124,18 +125,31 @@ WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
   AND bbox.ymin <= 50 AND bbox.ymax >= 40;
 ```
 
-**Count: 550 items**
-
 ::right::
 
-## Static Iceberg metadata
+| items |
+| ---: |
+| **550** |
+
+Verified 2026-11-16 with DuckDB 1.5.5, in a fresh anonymous connection. January 2024 UTC; bbox-envelope overlap, not exact geometry intersection.
+
+---
+layout: two-cols-header
+layoutClass: query-results
+---
+
+# Iceberg scan: static metadata href
+
+::left::
 
 ```sql
 SELECT count(*) AS items
 FROM iceberg_scan(
-  's3://nasa-maap-data-store/file-staging/nasa-map/' ||
-  'hls-stac-geoparquet-archive/v2/HLSL30_2.0/' ||
-  'iceberg/metadata/latest.metadata.json'
+  's3://nasa-maap-data-store/' ||
+  'file-staging/nasa-map/' ||
+  'hls-stac-geoparquet-archive/v2/' ||
+  'HLSL30_2.0/iceberg/metadata/' ||
+  'latest.metadata.json'
 )
 WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
   AND datetime < TIMESTAMPTZ '2024-02-01 00:00:00+00'
@@ -143,11 +157,13 @@ WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
   AND bbox.ymin <= 50 AND bbox.ymax >= 40;
 ```
 
-**Count: 550 items**
+::right::
 
-<div class="text-sm text-muted mt-3">
-Verified 2026-11-16 with DuckDB 1.5.5 in separate fresh connections, using anonymous S3 access. The spatial filter is bbox-envelope overlap, not exact geometry intersection; the time interval is half-open UTC. Counts matched.
-</div>
+| items |
+| ---: |
+| **550** |
+
+Verified 2026-11-16 with DuckDB 1.5.5, in a fresh anonymous connection. Same January 2024 UTC interval and bbox-envelope filter; counts match.
 
 ---
 layout: default

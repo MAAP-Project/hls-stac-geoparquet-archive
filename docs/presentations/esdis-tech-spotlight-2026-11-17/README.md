@@ -25,7 +25,11 @@ Reproduce from the repository root with the project's dev dependency group. This
 ```bash
 env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
   -u AWS_PROFILE -u AWS_DEFAULT_PROFILE uv run --group dev python - <<'PY'
+import logging
+
 import duckdb
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 parquet = (
     "s3://nasa-maap-data-store/file-staging/nasa-map/"
@@ -61,7 +65,7 @@ for label, source, extensions in [
     count = connection.execute(
         f"SELECT count(*) FROM {source} WHERE {where}"
     ).fetchone()[0]
-    print(f"{label}: {count}")
+    logging.info("%s: %s", label, count)
     connection.close()
 PY
 ```

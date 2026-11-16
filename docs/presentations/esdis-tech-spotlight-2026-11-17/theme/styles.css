@@ -110,6 +110,19 @@ li::marker { color: var(--maap-sky); }
   display: none;
 }
 
+.slidev-layout.two-cols-header.query-results {
+  grid-template-columns: minmax(0, 3fr) minmax(14rem, 1fr);
+  column-gap: 1.5rem;
+}
+
+.slidev-layout.two-cols-header.query-results .col-right {
+  font-size: 1.1rem;
+}
+
+.slidev-layout.two-cols-header.query-results table {
+  width: 100%;
+}
+
 .pipeline {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
