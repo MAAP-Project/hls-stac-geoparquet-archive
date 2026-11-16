@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import threading
 from functools import partial
 from html.parser import HTMLParser
@@ -97,7 +98,7 @@ def main() -> None:
             if link.startswith("DECK_LINK:")
         )
         deck_url = urljoin(landing_url, deck_link)
-        expected_deck_path = f"{prefix}/presentation/"
+        expected_deck_path = f"{prefix}/presentations/esdis-tech-spotlight-2026-11-17/"
         if urlsplit(deck_url).path != expected_deck_path:
             raise AssertionError(
                 f"deck link resolves to {deck_url}, expected path {expected_deck_path}"
@@ -116,9 +117,7 @@ def main() -> None:
         if not assets:
             raise AssertionError("Slidev entry page does not reference any assets")
         for asset_url in assets:
-            if not urlsplit(asset_url).path.startswith(
-                f"{prefix}/presentation/assets/"
-            ):
+            if not urlsplit(asset_url).path.startswith(f"{expected_deck_path}assets/"):
                 raise AssertionError(
                     f"deck asset resolves outside presentation path: {asset_url}"
                 )
@@ -126,11 +125,14 @@ def main() -> None:
                 if response.status != 200:
                     raise AssertionError(f"asset request failed: {asset_url}")
                 response.read()
-        print(f"OK: {landing_url} -> {deck_url}; fetched {len(assets)} deck assets")
+        logging.info(
+            "OK: %s -> %s; fetched %d deck assets", landing_url, deck_url, len(assets)
+        )
     finally:
         server.shutdown()
         server.server_close()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     main()

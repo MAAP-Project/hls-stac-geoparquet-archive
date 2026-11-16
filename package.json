@@ -4,8 +4,9 @@
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "slidev --host 127.0.0.1",
-    "build": "slidev build"
+    "dev": "slidev slides/slides.md",
+    "build:slides": "slidev build slides/slides.md --out ../docs/presentations/esdis-tech-spotlight-2026-11-17 --base ./",
+    "build": "./scripts/build-docs-and-slides.sh"
   },
   "dependencies": {
     "@slidev/cli": "52.6.0",

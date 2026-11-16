@@ -36,7 +36,7 @@ jobs:
         run: corepack enable && corepack prepare pnpm@9.15.0 --activate
 
       - name: Install slide dependencies
-        run: pnpm --dir slides install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -47,11 +47,10 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - name: Build slides
-        run: rm -rf docs/presentation && pnpm --dir slides exec slidev build --out ../docs/presentation --base /hls-stac-geoparquet-archive/presentation/
-
-      - name: Build docs
-        run: uv run mkdocs build
+      - name: Build docs and slides
+        run: pnpm build
+        env:
+          MKDOCS_CONFIG: mkdocs.yml
 
       - name: Verify slides in Pages artifact
         run: python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive

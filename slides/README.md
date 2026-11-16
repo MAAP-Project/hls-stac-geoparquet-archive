@@ -12,4 +12,14 @@ The user-preferred [Development Seed Slidev template](https://github.com/develop
 
 ## Build
 
-From the repository root, run `pnpm --dir slides install --frozen-lockfile` and `pnpm --dir slides build`. For a site build with the deck in the same output directory, use `./scripts/build-docs-and-slides.sh`; it builds Slidev into the ignored `docs/presentation/` directory first, then MkDocs copies those files to `build/presentation/`. Relative asset URLs keep the nested presentation working at local and GitHub Pages paths.
+Run these commands from the repository root (Node.js 22, pnpm 9.15.0):
+
+```bash
+pnpm install --frozen-lockfile
+pnpm dev          # Live editing at http://localhost:3030/
+pnpm build        # Build the deck and offline MkDocs site
+```
+
+`slides.md` and `theme/` are committed source. Only generated files are ignored. `pnpm build:slides` builds just the deck into `docs/presentations/esdis-tech-spotlight-2026-11-17/`; the combined build then lets MkDocs copy it into the same path under `build/`. The site endpoint is `presentations/esdis-tech-spotlight-2026-11-17/`. Relative asset URLs support both localhost and GitHub Pages without a separate build configuration.
+
+For a site preview, run `python -m http.server --directory build 8000`. For MkDocs live preview, run `pnpm build:slides` followed by `uv run mkdocs serve --config-file mkdocs.offline.yml`; slide edits need another `pnpm build:slides`. Use `pnpm dev` instead for Slidev hot reload. See the root README for cloud-backed notebook execution.

@@ -12,8 +12,10 @@ wheels/
 # npm
 infrastructure/node_modules/
 infrastructure/cdk.out/
+/node_modules/
 slides/node_modules/
-docs/presentation/
+# Generated Slidev site only; slides/ contains tracked presentation source.
+/docs/presentations/esdis-tech-spotlight-2026-11-17/
 .cache/
 
 docs/.ipynb_checkpoints/

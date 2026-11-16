@@ -11,31 +11,31 @@ It also publishes static Iceberg metadata at
 
 ### Slides and local documentation preview
 
-The introductory deck is authored in `slides/slides.md` with a small local Slidev theme. Its built files are generated under `docs/presentation/` before MkDocs copies them into `build/presentation/`; they are ignored and are not committed. The theme borrows the MAAP website's documented blue, deep-space, green, and amber palette. See [`slides/README.md`](slides/README.md) for the palette source and template attribution.
+The introductory deck's Markdown and MAAP theme are tracked in `slides/`. Only generated HTML/assets are ignored. See [`slides/README.md`](slides/README.md) for palette provenance and template attribution.
 
-Install the project and presentation dependencies, then build the documentation and deck:
+Use Node.js 22 and pnpm 9.15.0. From the repository root:
+
+```bash
+corepack enable
+corepack prepare pnpm@9.15.0 --activate
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Open <http://localhost:3030/> for Slidev's live preview. Edit `slides/slides.md` or `slides/theme/`; changes appear without rebuilding MkDocs.
+
+To view the deck inside the documentation site:
 
 ```bash
 uv sync
-corepack enable
-pnpm --dir slides install --frozen-lockfile
-./scripts/build-docs-and-slides.sh
+pnpm build
 uv run python scripts/check-slide-site.py
 python -m http.server --directory build 8000
 ```
 
-The smoke check verifies the landing-page link and deck asset requests over HTTP. To check the same routing under the GitHub Pages project prefix, run:
+Open <http://localhost:8000/> for the site or <http://localhost:8000/presentations/esdis-tech-spotlight-2026-11-17/> for the deck. `pnpm build` generates Slidev files under `docs/presentations/esdis-tech-spotlight-2026-11-17/`, then MkDocs copies them to `build/`. Relative asset URLs work locally and under the GitHub Pages project prefix. Check that prefix with `uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive`.
 
-```bash
-rm -rf docs/presentation
-pnpm --dir slides exec slidev build --out ../docs/presentation --base /hls-stac-geoparquet-archive/presentation/
-uv run mkdocs build --config-file mkdocs.offline.yml
-uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive
-```
-
-Open <http://localhost:8000/> for the site and <http://localhost:8000/presentation/> for the deck. The preview command uses `mkdocs.offline.yml`, which skips execution of the cloud-backed notebook. This is only for local preview; the scheduled Pages workflow continues to run `uv run mkdocs build` with notebook execution enabled. The offline build renders saved notebook outputs, so it does not validate live archive queries. To build with normal notebook execution locally, run `MKDOCS_CONFIG=mkdocs.yml ./scripts/build-docs-and-slides.sh`; this keeps the generated deck and MkDocs files from overwriting each other.
-
-To edit the deck with Slidev's live preview, run `pnpm --dir slides dev` and open <http://localhost:3030/>. The combined MkDocs preview is needed to check the deck at its published nested path.
+**Note:** The default local build uses `mkdocs.offline.yml` to render saved notebook outputs without executing cloud queries. It does not validate archive access. Pages uses `MKDOCS_CONFIG=mkdocs.yml pnpm build`, which executes the notebook and requires cloud access. Plain `uv run mkdocs build` or `serve` does not rebuild the slides; run `pnpm build:slides` first if using those commands directly.
 
 ```bash
 git clone https://github.com/MAAP-project/hls-stac-parquet.git
