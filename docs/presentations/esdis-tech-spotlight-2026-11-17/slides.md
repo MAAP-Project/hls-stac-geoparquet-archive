@@ -97,18 +97,20 @@ CREATE SECRET anon_s3 (
   SECRET '',
   REGION 'us-west-2'
 );
+
+SET VARIABLE hls_prefix =
+  's3://nasa-maap-data-store/file-staging/nasa-map/' ||
+  'hls-stac-geoparquet-archive/v2/HLSL30_2.0/';
 ```
 
-The direct query reads the exact monthly object. The Iceberg query follows only the published metadata file to locate data objects.
+The direct query reads an exact monthly object key. For the six-month example, it lists six month-specific Parquet keys under `hls_prefix`; the Iceberg query keeps using only `latest.metadata.json`.
 
 ---
-layout: two-cols-header
-layoutClass: query-results
+layout: default
+class: sql-walkthrough
 ---
 
-# Direct scan: exact monthly Parquet key
-
-::left::
+# Direct scan: exact January Parquet key
 
 ```sql {1-13|2-8|9-10|11-12|1,13|1-13}
 SELECT count(*) AS items
@@ -125,44 +127,37 @@ WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
   AND bbox.ymin <= 50 AND bbox.ymax >= 40;
 ```
 
-::right::
-
-<div class="query-result">
-  <strong>Result: 550 items</strong>
-  <span>Observed runtime: 7.260 s</span>
-  <small>One run · DuckDB 1.5.5 · 2026-11-16</small>
+<div class="query-capture">
+  <div>
+    <strong>Captured DuckDB output</strong>
+    <pre class="duckdb-output">┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│   550 │
+└───────┘</pre>
+  </div>
+  <p><strong>Observed query wall time: 7.761 s</strong><br><small>DuckDB 1.5.5 · one run · 2026-11-16</small></p>
 </div>
 
 <v-switch at="1">
-  <template #1>
-    <p><strong>Source:</strong> The exact January Parquet key names one object directly; no bucket listing or wildcard expansion.</p>
-  </template>
-  <template #2>
-    <p><strong>Time:</strong> Include Jan 1 at 00:00 UTC and exclude Feb 1 at 00:00 UTC.</p>
-  </template>
-  <template #3>
-    <p><strong>Spatial filter:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p>
-  </template>
-  <template #4>
-    <p><strong>Count:</strong> Return the number of records satisfying both filters.</p>
-  </template>
-  <template #5>
-    <p>The full query combines the exact source, half-open month, bbox-envelope overlap, and count.</p>
-  </template>
+  <template #1><p><strong>Source:</strong> This exact January object key needs no bucket listing.</p></template>
+  <template #2><p><strong>Time:</strong> Include Jan 1 UTC; exclude Feb 1 UTC.</p></template>
+  <template #3><p><strong>Spatial:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p></template>
+  <template #4><p><strong>Count:</strong> Count records that satisfy both filters.</p></template>
+  <template #5><p>The complete query combines the exact key, half-open month, envelope overlap, and count.</p></template>
 </v-switch>
 
-<div class="query-caveat">Single-run wall time around execute + fetchone only; setup excluded. No warm/cold cache guarantee or benchmark claim.</div>
+<div class="query-caveat">Timer covers execute + fetchone only; setup and output formatting excluded. Single run, with no cache or network conditions guaranteed.</div>
 
 ---
-layout: two-cols-header
-layoutClass: query-results
+layout: default
+class: sql-walkthrough
 ---
 
 # Iceberg scan: static metadata href
 
-::left::
-
-```sql {1-13|2-8|9-10|11-12|1,13|1-13}
+```sql {1-12|2-8|9-10|11-12|1|1-12}
 SELECT count(*) AS items
 FROM iceberg_scan(
   's3://nasa-maap-data-store/' ||
@@ -177,33 +172,115 @@ WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
   AND bbox.ymin <= 50 AND bbox.ymax >= 40;
 ```
 
-::right::
-
-<div class="query-result">
-  <strong>Result: 550 items</strong>
-  <span>Observed runtime: 9.756 s</span>
-  <small>One run · DuckDB 1.5.5 · 2026-11-16</small>
+<div class="query-capture">
+  <div>
+    <strong>Captured DuckDB output</strong>
+    <pre class="duckdb-output">┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│   550 │
+└───────┘</pre>
+  </div>
+  <p><strong>Observed query wall time: 9.846 s</strong><br><small>DuckDB 1.5.5 · one run · 2026-11-16</small></p>
 </div>
 
 <v-switch at="1">
-  <template #1>
-    <p><strong>Source:</strong> Start at only the published metadata href; Iceberg follows its manifest references to data files.</p>
-  </template>
-  <template #2>
-    <p><strong>Time:</strong> Include Jan 1 at 00:00 UTC and exclude Feb 1 at 00:00 UTC.</p>
-  </template>
-  <template #3>
-    <p><strong>Spatial filter:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p>
-  </template>
-  <template #4>
-    <p><strong>Count:</strong> Return the number of records satisfying both filters.</p>
-  </template>
-  <template #5>
-    <p>The full query combines the metadata href, half-open month, bbox-envelope overlap, and count.</p>
-  </template>
+  <template #1><p><strong>Source:</strong> Start at the metadata href; Iceberg follows its manifest references to data files.</p></template>
+  <template #2><p><strong>Time:</strong> Include Jan 1 UTC; exclude Feb 1 UTC.</p></template>
+  <template #3><p><strong>Spatial:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p></template>
+  <template #4><p><strong>Count:</strong> Count records that satisfy both filters.</p></template>
+  <template #5><p>The complete query combines the metadata href, half-open month, envelope overlap, and count.</p></template>
 </v-switch>
 
-<div class="query-caveat">Single-run wall time around execute + fetchone only; setup excluded. No warm/cold cache guarantee or benchmark claim.</div>
+<div class="query-caveat">Timer covers execute + fetchone only; setup and output formatting excluded. Single run, with no cache or network conditions guaranteed.</div>
+
+---
+layout: default
+class: sql-walkthrough
+---
+
+# Direct scan: six explicit monthly objects
+
+```sql {1-13|2-9|10-11|12-13|1|1-13}
+SELECT count(*) AS items
+FROM read_parquet([
+  getvariable('hls_prefix') || 'year=2024/month=1/HLSL30_2.0-2024-1.parquet',
+  getvariable('hls_prefix') || 'year=2024/month=2/HLSL30_2.0-2024-2.parquet',
+  getvariable('hls_prefix') || 'year=2024/month=3/HLSL30_2.0-2024-3.parquet',
+  getvariable('hls_prefix') || 'year=2024/month=4/HLSL30_2.0-2024-4.parquet',
+  getvariable('hls_prefix') || 'year=2024/month=5/HLSL30_2.0-2024-5.parquet',
+  getvariable('hls_prefix') || 'year=2024/month=6/HLSL30_2.0-2024-6.parquet'
+])
+WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
+  AND datetime < TIMESTAMPTZ '2024-07-01 00:00:00+00'
+  AND bbox.xmin <= -90 AND bbox.xmax >= -100
+  AND bbox.ymin <= 50 AND bbox.ymax >= 40;
+```
+
+<div class="query-capture">
+  <div>
+    <strong>Captured DuckDB output</strong>
+    <pre class="duckdb-output">┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│  5101 │
+└───────┘</pre>
+  </div>
+  <p><strong>Observed query wall time: 10.369 s</strong><br><small>DuckDB 1.5.5 · one run · 2026-11-16</small></p>
+</div>
+
+<v-switch at="1">
+  <template #1><p><strong>Source:</strong> The six exact keys are enumerated; direct access does not discover months with a bucket listing.</p></template>
+  <template #2><p><strong>Time:</strong> Include Jan 1 UTC; exclude Jul 1 UTC.</p></template>
+  <template #3><p><strong>Spatial:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p></template>
+  <template #4><p><strong>Count:</strong> Count records that satisfy both filters across the six files.</p></template>
+  <template #5><p>Six known monthly files spell out the direct source list; no wildcard expansion or listing.</p></template>
+</v-switch>
+
+<div class="query-caveat">Timer covers execute + fetchone only; setup and output formatting excluded. Single run, with no cache or network conditions guaranteed.</div>
+
+---
+layout: default
+class: sql-walkthrough
+---
+
+# Iceberg scan: same six-month window
+
+```sql {1-8|2-4|5-6|7-8|1|1-8}
+SELECT count(*) AS items
+FROM iceberg_scan(
+  getvariable('hls_prefix') || 'iceberg/metadata/latest.metadata.json'
+)
+WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
+  AND datetime < TIMESTAMPTZ '2024-07-01 00:00:00+00'
+  AND bbox.xmin <= -90 AND bbox.xmax >= -100
+  AND bbox.ymin <= 50 AND bbox.ymax >= 40;
+```
+
+<div class="query-capture">
+  <div>
+    <strong>Captured DuckDB output</strong>
+    <pre class="duckdb-output">┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│  5101 │
+└───────┘</pre>
+  </div>
+  <p><strong>Observed query wall time: 12.105 s</strong><br><small>DuckDB 1.5.5 · one run · 2026-11-16</small></p>
+</div>
+
+<v-switch at="1">
+  <template #1><p><strong>Source:</strong> The same metadata href identifies the Iceberg table; its manifests direct the scan to files.</p></template>
+  <template #2><p><strong>Time:</strong> Include Jan 1 UTC; exclude Jul 1 UTC.</p></template>
+  <template #3><p><strong>Spatial:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p></template>
+  <template #4><p><strong>Count:</strong> Count records that satisfy both filters across the six months.</p></template>
+  <template #5><p>Iceberg keeps one metadata entrypoint while its published references identify the monthly data files.</p></template>
+</v-switch>
+
+<div class="query-caveat">Timer covers execute + fetchone only; setup and output formatting excluded. Single run, with no cache or network conditions guaranteed.</div>
 
 ---
 layout: default

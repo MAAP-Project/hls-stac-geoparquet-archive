@@ -16,75 +16,142 @@ The theme follows Slidev's built-in light/dark toggle (`html.dark`). Semantic va
 
 The user-preferred [Development Seed Slidev template](https://github.com/developmentseed/ds-slidev-template) was inspected at local reference commit `ba87b3b882c19df868e3b834c13be22f7bb05351`. Its use of a local Slidev theme entry point and CSS custom properties informed the structure here. No external-repository runtime dependency or DevSeed-branded component, font, image, or styling was included.
 
-## Verified anonymous SQL comparison
+## Anonymous SQL comparison: one month and six months
 
-On 2026-11-16, DuckDB 1.5.5 returned **550** HLSL30 items from both the exact January 2024 Parquet object and the static Iceberg metadata href. Both queries used `datetime >= 2024-01-01T00:00:00Z AND datetime < 2024-02-01T00:00:00Z` and bbox-envelope overlap with `(-100, 40, -90, 50)`. This is an envelope filter, not an exact geometry intersection. Anonymous `HEAD` requests to both public S3 objects returned HTTP 200.
+All four queries were run on 2026-11-16 with DuckDB 1.5.5, a fresh connection per query, and explicitly empty S3 credentials. They use HLSL30, bbox-envelope overlap with `(-100, 40, -90, 50)` (not exact geometry intersection), and half-open UTC intervals: January `[2024-01-01, 2024-02-01)` and six months `[2024-01-01, 2024-07-01)`. Anonymous `HEAD` requests to the public January Parquet object and Iceberg metadata href had previously returned HTTP 200.
 
-A single measured run on 2026-11-16 observed **7.260 s** for the direct Parquet query and **9.756 s** for the Iceberg query. Each source used a fresh DuckDB connection. `time.perf_counter()` enclosed only `execute(...).fetchone()`; extension installation/loading and secret creation happened first. These are observed single-run wall times, not a benchmark or evidence that one access path is generally faster. The run does not establish warm/cold cache or network conditions, and results will vary with environment.
+The direct six-month query enumerates the six exact monthly Parquet keys. It does not use a glob or discover keys by bucket listing. Iceberg uses the same `latest.metadata.json` entrypoint for either interval; its metadata and manifests reference the relevant data files. This illustrates a simpler table entrypoint, not guaranteed faster performance.
 
-Reproduce from the repository root with the project's dev dependency group. The script creates a new DuckDB connection for each source and explicitly uses empty S3 credentials rather than a credential chain:
+Observed single-run results:
+
+| Query | Items | Wall time |
+| --- | ---: | ---: |
+| Direct January object | 550 | 7.761 s |
+| Iceberg January | 550 | 9.846 s |
+| Direct six explicit objects | 5,101 | 10.369 s |
+| Iceberg six-month scan | 5,101 | 12.105 s |
+
+`time.perf_counter()` covered `connection.sql(query)` plus `relation.fetchone()`; extension install/load, anonymous secret creation, prefix-variable setup, and `relation.show()` formatting were outside the timer. The captured output comes from `relation.show()` on that same materialized relation after the timed fetch. The two six-month results match. These are one-run observations, not benchmark results; they establish no warm/cold cache or network conditions, nor a general performance comparison.
+
+Reproduce from the repository root with the project's dev dependency group. AWS credential/profile variables are unset, each query gets a fresh connection, and the query source for the direct six-month scan lists months 1 through 6 explicitly:
 
 ```bash
 env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
   -u AWS_PROFILE -u AWS_DEFAULT_PROFILE uv run --group dev python - <<'PY'
+import contextlib
+import io
 import logging
 import time
 
 import duckdb
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-parquet = (
+prefix = (
     "s3://nasa-maap-data-store/file-staging/nasa-map/"
     "hls-stac-geoparquet-archive/v2/HLSL30_2.0/"
-    "year=2024/month=1/HLSL30_2.0-2024-1.parquet"
 )
-metadata = (
-    "s3://nasa-maap-data-store/file-staging/nasa-map/"
-    "hls-stac-geoparquet-archive/v2/HLSL30_2.0/"
-    "iceberg/metadata/latest.metadata.json"
-)
-where = """
+jan = """
 datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
 AND datetime < TIMESTAMPTZ '2024-02-01 00:00:00+00'
 AND bbox.xmin <= -90 AND bbox.xmax >= -100
 AND bbox.ymin <= 50 AND bbox.ymax >= 40
 """
-
-for label, source, extensions in [
-    ("direct parquet", f"read_parquet('{parquet}')", "INSTALL httpfs; LOAD httpfs;"),
+six_months = """
+datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
+AND datetime < TIMESTAMPTZ '2024-07-01 00:00:00+00'
+AND bbox.xmin <= -90 AND bbox.xmax >= -100
+AND bbox.ymin <= 50 AND bbox.ymax >= 40
+"""
+month_paths = ",\n  ".join(
+    f"getvariable('hls_prefix') || 'year=2024/month={month}/HLSL30_2.0-2024-{month}.parquet'"
+    for month in range(1, 7)
+)
+queries = [
     (
-        "static iceberg",
-        f"iceberg_scan('{metadata}')",
+        "direct January",
+        f"SELECT count(*) AS items FROM read_parquet(getvariable('hls_prefix') || 'year=2024/month=1/HLSL30_2.0-2024-1.parquet') WHERE {jan}",
+        "INSTALL httpfs; LOAD httpfs;",
+    ),
+    (
+        "Iceberg January",
+        f"SELECT count(*) AS items FROM iceberg_scan(getvariable('hls_prefix') || 'iceberg/metadata/latest.metadata.json') WHERE {jan}",
         "INSTALL httpfs; LOAD httpfs; INSTALL iceberg; LOAD iceberg;",
     ),
-]:
+    (
+        "direct six months",
+        f"""SELECT count(*) AS items FROM read_parquet([
+  {month_paths}
+]) WHERE {six_months}""",
+        "INSTALL httpfs; LOAD httpfs;",
+    ),
+    (
+        "Iceberg six months",
+        f"SELECT count(*) AS items FROM iceberg_scan(getvariable('hls_prefix') || 'iceberg/metadata/latest.metadata.json') WHERE {six_months}",
+        "INSTALL httpfs; LOAD httpfs; INSTALL iceberg; LOAD iceberg;",
+    ),
+]
+for label, query, extensions in queries:
     connection = duckdb.connect()
     connection.execute(extensions)
     connection.execute(
         "CREATE SECRET anon_s3 (TYPE S3, PROVIDER CONFIG, "
         "KEY_ID '', SECRET '', REGION 'us-west-2')"
     )
+    connection.execute(f"SET VARIABLE hls_prefix = '{prefix}'")
     started = time.perf_counter()
-    count = connection.execute(
-        f"SELECT count(*) FROM {source} WHERE {where}"
-    ).fetchone()[0]
+    relation = connection.sql(query)
+    count = relation.fetchone()[0]
     elapsed = time.perf_counter() - started
-    logging.info("%s: count=%s elapsed=%.3f seconds", label, count, elapsed)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        relation.show()
+    logging.info(
+        "%s: count=%s elapsed=%.3f seconds\n%s",
+        label,
+        count,
+        elapsed,
+        output.getvalue().rstrip(),
+    )
     connection.close()
 logging.info("DuckDB version: %s", duckdb.__version__)
 PY
 ```
 
-Observed output on 2026-11-16 (your times will differ):
+Observed output from the run above:
 
 ```text
-direct parquet: count=550 elapsed=7.260 seconds
-static iceberg: count=550 elapsed=9.756 seconds
+direct January: count=550 elapsed=7.761 seconds
+┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│   550 │
+└───────┘
+Iceberg January: count=550 elapsed=9.846 seconds
+┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│   550 │
+└───────┘
+direct six months: count=5101 elapsed=10.369 seconds
+┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│  5101 │
+└───────┘
+Iceberg six months: count=5101 elapsed=12.105 seconds
+┌───────┐
+│ items │
+│ int64 │
+├───────┤
+│  5101 │
+└───────┘
 DuckDB version: 1.5.5
 ```
 
-The monthly Parquet href pins the direct scan to one known object, so it needs no bucket listing. The Iceberg scan starts from only the published `latest.metadata.json` href and follows its file references. Do not replace the empty-credential secret with `credential_chain` when reproducing the anonymous-access test.
+Do not replace the empty-credential secret with `credential_chain` when reproducing this anonymous-access check.
 
 ## Build
 
