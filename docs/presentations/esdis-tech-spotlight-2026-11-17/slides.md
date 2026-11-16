@@ -80,28 +80,74 @@ The result is intentionally a snapshot. Recent months can be incomplete, and rec
 layout: default
 ---
 
-# Query path: DuckDB + Iceberg
+# Anonymous DuckDB setup
+
+The archive objects are publicly readable, so these queries do not need a credential chain or bucket listing. Use a fresh DuckDB connection and an anonymous S3 secret:
 
 ```sql
+INSTALL httpfs;
+LOAD httpfs;
 INSTALL iceberg;
 LOAD iceberg;
 
-CREATE OR REPLACE SECRET nasa_maap_data_store (
+CREATE SECRET anon_s3 (
   TYPE S3,
-  REGION 'us-west-2',
-  PROVIDER credential_chain
+  PROVIDER CONFIG,
+  KEY_ID '',
+  SECRET '',
+  REGION 'us-west-2'
 );
-
-SELECT *
-FROM iceberg_scan(
-  's3://nasa-maap-data-store/file-staging/nasa-map/'
-  || 'hls-stac-geoparquet-archive/v2/'
-  || 'HLSL30_2.0/iceberg/metadata/latest.metadata.json'
-)
-LIMIT 10;
 ```
 
-The credential-chain provider must be configured in the runtime with valid AWS credentials. The Iceberg metadata points to objects that still require read access; this is not an anonymous-access guarantee.
+The direct query reads the exact monthly object. The Iceberg query follows only the published metadata file to locate data objects.
+
+---
+layout: two-cols
+---
+
+# Same filter, two access paths
+
+::left::
+
+## Exact Parquet object
+
+```sql
+SELECT count(*) AS items
+FROM read_parquet(
+  's3://nasa-maap-data-store/file-staging/nasa-map/' ||
+  'hls-stac-geoparquet-archive/v2/HLSL30_2.0/' ||
+  'year=2024/month=1/HLSL30_2.0-2024-1.parquet'
+)
+WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
+  AND datetime < TIMESTAMPTZ '2024-02-01 00:00:00+00'
+  AND bbox.xmin <= -90 AND bbox.xmax >= -100
+  AND bbox.ymin <= 50 AND bbox.ymax >= 40;
+```
+
+**Count: 550 items**
+
+::right::
+
+## Static Iceberg metadata
+
+```sql
+SELECT count(*) AS items
+FROM iceberg_scan(
+  's3://nasa-maap-data-store/file-staging/nasa-map/' ||
+  'hls-stac-geoparquet-archive/v2/HLSL30_2.0/' ||
+  'iceberg/metadata/latest.metadata.json'
+)
+WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
+  AND datetime < TIMESTAMPTZ '2024-02-01 00:00:00+00'
+  AND bbox.xmin <= -90 AND bbox.xmax >= -100
+  AND bbox.ymin <= 50 AND bbox.ymax >= 40;
+```
+
+**Count: 550 items**
+
+<div class="text-sm text-muted mt-3">
+Verified 2026-11-16 with DuckDB 1.5.5 in separate fresh connections, using anonymous S3 access. The spatial filter is bbox-envelope overlap, not exact geometry intersection; the time interval is half-open UTC. Counts matched.
+</div>
 
 ---
 layout: default

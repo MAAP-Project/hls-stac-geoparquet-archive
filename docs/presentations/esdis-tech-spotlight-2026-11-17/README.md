@@ -16,6 +16,65 @@ The theme follows Slidev's built-in light/dark toggle (`html.dark`). Semantic va
 
 The user-preferred [Development Seed Slidev template](https://github.com/developmentseed/ds-slidev-template) was inspected at local reference commit `ba87b3b882c19df868e3b834c13be22f7bb05351`. Its use of a local Slidev theme entry point and CSS custom properties informed the structure here. No external-repository runtime dependency or DevSeed-branded component, font, image, or styling was included.
 
+## Verified anonymous SQL comparison
+
+On 2026-11-16, DuckDB 1.5.5 returned **550** HLSL30 items from both the exact January 2024 Parquet object and the static Iceberg metadata href. Both queries used `datetime >= 2024-01-01T00:00:00Z AND datetime < 2024-02-01T00:00:00Z` and bbox-envelope overlap with `(-100, 40, -90, 50)`. This is an envelope filter, not an exact geometry intersection. Anonymous `HEAD` requests to both public S3 objects returned HTTP 200.
+
+Reproduce from the repository root with the project's dev dependency group. This creates a new DuckDB connection for each source and explicitly uses empty S3 credentials rather than a credential chain:
+
+```bash
+env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+  -u AWS_PROFILE -u AWS_DEFAULT_PROFILE uv run --group dev python - <<'PY'
+import duckdb
+
+parquet = (
+    "s3://nasa-maap-data-store/file-staging/nasa-map/"
+    "hls-stac-geoparquet-archive/v2/HLSL30_2.0/"
+    "year=2024/month=1/HLSL30_2.0-2024-1.parquet"
+)
+metadata = (
+    "s3://nasa-maap-data-store/file-staging/nasa-map/"
+    "hls-stac-geoparquet-archive/v2/HLSL30_2.0/"
+    "iceberg/metadata/latest.metadata.json"
+)
+where = """
+datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
+AND datetime < TIMESTAMPTZ '2024-02-01 00:00:00+00'
+AND bbox.xmin <= -90 AND bbox.xmax >= -100
+AND bbox.ymin <= 50 AND bbox.ymax >= 40
+"""
+
+for label, source, extensions in [
+    ("direct parquet", f"read_parquet('{parquet}')", "INSTALL httpfs; LOAD httpfs;"),
+    (
+        "static iceberg",
+        f"iceberg_scan('{metadata}')",
+        "INSTALL httpfs; LOAD httpfs; INSTALL iceberg; LOAD iceberg;",
+    ),
+]:
+    connection = duckdb.connect()
+    connection.execute(extensions)
+    connection.execute(
+        "CREATE SECRET anon_s3 (TYPE S3, PROVIDER CONFIG, "
+        "KEY_ID '', SECRET '', REGION 'us-west-2')"
+    )
+    count = connection.execute(
+        f"SELECT count(*) FROM {source} WHERE {where}"
+    ).fetchone()[0]
+    print(f"{label}: {count}")
+    connection.close()
+PY
+```
+
+Expected output:
+
+```text
+direct parquet: 550
+static iceberg: 550
+```
+
+The monthly Parquet href pins the direct scan to one known object, so it needs no bucket listing. The Iceberg scan starts from only the published `latest.metadata.json` href and follows its file references. Do not replace the empty-credential secret with `credential_chain` when reproducing the anonymous-access test.
+
 ## Build
 
 Run these commands from the repository root (Node.js 22, pnpm 9.15.0):
