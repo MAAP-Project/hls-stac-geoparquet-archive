@@ -57,7 +57,7 @@ layout: default
   <div class="pipeline-step"><strong>4 · Static Iceberg</strong>Publish table metadata for exact file locations.</div>
 </div>
 
-<div class="mt-8 text-sm text-gray-500">
+<div class="mt-8 text-sm text-muted">
   DuckDB can read the Iceberg metadata and referenced objects without relying on recursive S3 bucket listing.
 </div>
 

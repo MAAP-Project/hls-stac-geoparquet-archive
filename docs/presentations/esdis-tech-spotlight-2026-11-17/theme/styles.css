@@ -9,16 +9,35 @@
   --maap-green: #22c55e;
   --maap-amber: #f59e0b;
   --maap-gray: #525252;
-  --slidev-theme-primary: var(--maap-blue);
+  --maap-surface: #fff;
+  --maap-text: #262626;
+  --maap-heading: var(--maap-space);
+  --maap-accent: var(--maap-blue);
+  --maap-strong: var(--maap-navy);
+  --maap-muted: var(--maap-gray);
+  --maap-panel: #eaf7fc;
+  --slidev-theme-primary: var(--maap-accent);
   --slidev-theme-secondary: var(--maap-sky);
-  --slidev-theme-surface: #fff;
+  --slidev-theme-surface: var(--maap-surface);
+  --slidev-code-background: #fff;
   --slidev-font-family: 'Ropa Sans', sans-serif;
   --slidev-font-family-heading: 'Ropa Sans', sans-serif;
   --slidev-font-family-mono: 'Roboto Mono', monospace;
 }
 
+html.dark {
+  --maap-surface: var(--maap-space);
+  --maap-text: #eaf7fc;
+  --maap-heading: #fff;
+  --maap-accent: var(--maap-sky-light);
+  --maap-strong: #fff;
+  --maap-muted: #b8c9dd;
+  --maap-panel: var(--maap-navy);
+  --slidev-code-background: #24292e;
+}
+
 body {
-  color: #262626;
+  color: var(--maap-text);
   font-family: var(--slidev-font-family);
 }
 
@@ -27,6 +46,8 @@ body {
   width: 100%;
   height: 100%;
   padding: 2.5rem 3.5rem;
+  color: var(--maap-text);
+  background: var(--maap-surface);
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -34,14 +55,26 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 400;
 }
 
-h1 { color: var(--maap-space); }
-h2 { color: var(--maap-blue); }
-a, code { color: var(--maap-blue); }
-strong { color: var(--maap-navy); }
+.slidev-layout h1 { color: var(--maap-heading); }
+.slidev-layout h2,
+.slidev-layout a,
+.slidev-layout :not(pre) > code { color: var(--maap-accent); }
+.slidev-layout strong { color: var(--maap-strong); }
+
+.slidev-layout h1 + p {
+  color: var(--maap-muted);
+  opacity: 1;
+}
+
+.slidev-layout .text-muted { color: var(--maap-muted); }
 
 .slidev-layout.cover {
+  --maap-text: #fff;
+  --maap-heading: #fff;
+  --maap-accent: var(--maap-sky-light);
+  --maap-strong: #fff;
+  --maap-muted: var(--maap-sky-light);
   background: linear-gradient(130deg, var(--maap-space), var(--maap-navy) 68%, var(--maap-blue));
-  color: #fff;
 }
 
 .slidev-layout.cover h1,
@@ -70,7 +103,7 @@ li::marker { color: var(--maap-sky); }
 }
 
 .pipeline-step {
-  background: #eaf7fc;
+  background: var(--maap-panel);
   border-top: 4px solid var(--maap-sky);
   border-radius: 0.4rem;
   padding: 0.9rem;
@@ -79,7 +112,7 @@ li::marker { color: var(--maap-sky); }
 
 .pipeline-step strong {
   display: block;
-  color: var(--maap-blue);
+  color: var(--maap-accent);
   font-size: 1rem;
   margin-bottom: 0.35rem;
 }

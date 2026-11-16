@@ -6,6 +6,12 @@ Edit [`slides.md`](slides.md) and the local theme under `theme/`. The theme is i
 
 The colors are sourced from `src/css/custom.css` in [MAAP-Project/maap-website](https://github.com/MAAP-Project/maap-website/blob/main/src/css/custom.css), retrieved from its default branch on 2026-11-16. The theme uses the site's deep-space `#0b1120` and `#152347`, primary blue `#00549f`, interactive blue `#0098db`, blue tint `#a3d9f1`, green `#22c55e`, and amber `#f59e0b`. Ropa Sans follows the website's declared brand font. These are palette and typography references, not an official MAAP design-system package.
 
+## Light and dark mode
+
+The theme follows Slidev's built-in light/dark toggle (`html.dark`). Semantic variables in `theme/styles.css` control text, headings, links, muted notes, and card backgrounds in both modes. The cover keeps its dark MAAP gradient in either mode. Use `text-muted` for secondary text rather than a fixed gray utility.
+
+`theme/setup/shiki.ts` selects Shiki's GitHub light/dark palettes; code backgrounds match those palettes. Inline code uses the theme accent without overriding highlighted code tokens. When changing colors, check both modes, including the pipeline and SQL slides.
+
 ## Template attribution
 
 The user-preferred [Development Seed Slidev template](https://github.com/developmentseed/ds-slidev-template) was inspected at local reference commit `ba87b3b882c19df868e3b834c13be22f7bb05351`. Its use of a local Slidev theme entry point and CSS custom properties informed the structure here. No external-repository runtime dependency or DevSeed-branded component, font, image, or styling was included.
