@@ -73,6 +73,11 @@ def main() -> None:
     if not args.site_dir.is_dir():
         parser.error(f"site directory does not exist: {args.site_dir}")
 
+    deck_dir = args.site_dir / "presentations/esdis-tech-spotlight-2026-11-17"
+    for authoring_path in ("slides/index.html", "README/index.html", "theme"):
+        if (deck_dir / authoring_path).exists():
+            raise AssertionError(f"Authoring files leaked into site: {authoring_path}")
+
     class SiteHandler(SimpleHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
             """Keep smoke-check HTTP output limited to its final result."""

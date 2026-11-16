@@ -8,6 +8,13 @@ repo_url: https://github.com/MAAP-Project/hls-stac-geoparquet-archive
 docs_dir: 'docs'
 site_dir: 'build'
 
+# Slidev renders these authoring files; MkDocs copies only the generated deck.
+exclude_docs: |
+  /presentations/*/slides.md
+  /presentations/*/README.md
+  /presentations/*/theme/
+  /presentations/*/public/
+
 extra:
   social:
     - icon: "fontawesome/brands/github"

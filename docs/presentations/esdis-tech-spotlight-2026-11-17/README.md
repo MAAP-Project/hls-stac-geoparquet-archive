@@ -20,6 +20,18 @@ pnpm dev          # Live editing at http://localhost:3030/
 pnpm build        # Build the deck and offline MkDocs site
 ```
 
-`slides.md` and `theme/` are committed source. Only generated files are ignored. `pnpm build:slides` builds just the deck into `docs/presentations/esdis-tech-spotlight-2026-11-17/`; the combined build then lets MkDocs copy it into the same path under `build/`. The site endpoint is `presentations/esdis-tech-spotlight-2026-11-17/`. Slidev's router requires an explicit mount path. The default build uses `/presentations/esdis-tech-spotlight-2026-11-17/`. For GitHub Pages, set `SITE_PREFIX=/hls-stac-geoparquet-archive` when running `pnpm build` or `pnpm build:slides`. Rebuild without that variable for localhost; a Pages build is not interchangeable with a root-mounted local preview.
+All deck materials live in `docs/presentations/esdis-tech-spotlight-2026-11-17/`:
+
+```text
+slides.md       # Tracked Slidev source
+README.md       # Tracked authoring notes
+theme/          # Tracked local MAAP theme
+index.html      # Generated, ignored
+404.html        # Generated, ignored
+_redirects      # Generated, ignored
+assets/         # Generated, ignored; put source images in public/ instead
+```
+
+`pnpm build:slides` stages output in `.cache/slidev/esdis-tech-spotlight-2026-11-17/`, then copies generated files alongside the source without deleting Markdown or theme files. MkDocs excludes `slides.md`, this README, and `theme/` from its site build and copies the generated deck to the matching path under `build/`. The site endpoint is `presentations/esdis-tech-spotlight-2026-11-17/`. Slidev's router requires an explicit mount path. The default build uses `/presentations/esdis-tech-spotlight-2026-11-17/`. For GitHub Pages, set `SITE_PREFIX=/hls-stac-geoparquet-archive` when running `pnpm build` or `pnpm build:slides`. Rebuild without that variable for localhost; a Pages build is not interchangeable with a root-mounted local preview.
 
 For a site preview, run `python -m http.server --directory build 8000`. For MkDocs live preview, run `pnpm build:slides` followed by `uv run mkdocs serve --config-file mkdocs.offline.yml`; slide edits need another `pnpm build:slides`. Use `pnpm dev` instead for Slidev hot reload. See the root README for cloud-backed notebook execution.

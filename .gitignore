@@ -13,9 +13,11 @@ wheels/
 infrastructure/node_modules/
 infrastructure/cdk.out/
 /node_modules/
-slides/node_modules/
-# Generated Slidev site only; slides/ contains tracked presentation source.
-/docs/presentations/esdis-tech-spotlight-2026-11-17/
+# Generated Slidev output only; Markdown and theme sources stay tracked.
+/docs/presentations/esdis-tech-spotlight-2026-11-17/index.html
+/docs/presentations/esdis-tech-spotlight-2026-11-17/404.html
+/docs/presentations/esdis-tech-spotlight-2026-11-17/_redirects
+/docs/presentations/esdis-tech-spotlight-2026-11-17/assets/
 .cache/
 
 docs/.ipynb_checkpoints/
