@@ -83,19 +83,25 @@ layout: default
 # Query path: DuckDB + Iceberg
 
 ```sql
-INSTALL httpfs;
 INSTALL iceberg;
-LOAD httpfs;
 LOAD iceberg;
+
+CREATE OR REPLACE SECRET nasa_maap_data_store (
+  TYPE S3,
+  REGION 'us-west-2',
+  PROVIDER credential_chain
+);
 
 SELECT *
 FROM iceberg_scan(
-  's3://nasa-maap-data-store/file-staging/nasa-map/hls-stac-geoparquet-archive/v2/HLSL30/iceberg/metadata/latest.metadata.json'
+  's3://nasa-maap-data-store/file-staging/nasa-map/'
+  || 'hls-stac-geoparquet-archive/v2/'
+  || 'HLSL30_2.0/iceberg/metadata/latest.metadata.json'
 )
 LIMIT 10;
 ```
 
-The metadata describes the table and its file locations. Access still depends on the actual object's permissions and the correct S3/MAAP credentials; this example does not claim anonymous access.
+The credential-chain provider must be configured in the runtime with valid AWS credentials. The Iceberg metadata points to objects that still require read access; this is not an anonymous-access guarantee.
 
 ---
 layout: default

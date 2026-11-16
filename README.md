@@ -20,7 +20,17 @@ uv sync
 corepack enable
 pnpm --dir slides install --frozen-lockfile
 ./scripts/build-docs-and-slides.sh
+uv run python scripts/check-slide-site.py
 python -m http.server --directory build 8000
+```
+
+The smoke check verifies the landing-page link and deck asset requests over HTTP. To check the same routing under the GitHub Pages project prefix, run:
+
+```bash
+rm -rf docs/presentation
+pnpm --dir slides exec slidev build --out ../docs/presentation --base /hls-stac-geoparquet-archive/presentation/
+uv run mkdocs build --config-file mkdocs.offline.yml
+uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive
 ```
 
 Open <http://localhost:8000/> for the site and <http://localhost:8000/presentation/> for the deck. The preview command uses `mkdocs.offline.yml`, which skips execution of the cloud-backed notebook. This is only for local preview; the scheduled Pages workflow continues to run `uv run mkdocs build` with notebook execution enabled. The offline build renders saved notebook outputs, so it does not validate live archive queries. To build with normal notebook execution locally, run `MKDOCS_CONFIG=mkdocs.yml ./scripts/build-docs-and-slides.sh`; this keeps the generated deck and MkDocs files from overwriting each other.
