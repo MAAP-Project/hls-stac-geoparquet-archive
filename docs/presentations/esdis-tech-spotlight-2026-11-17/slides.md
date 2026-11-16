@@ -110,7 +110,7 @@ layoutClass: query-results
 
 ::left::
 
-```sql
+```sql {1-13|2-8|9-10|11-12|1,13|1-13}
 SELECT count(*) AS items
 FROM read_parquet(
   's3://nasa-maap-data-store/' ||
@@ -127,11 +127,31 @@ WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
 
 ::right::
 
-| items |
-| ---: |
-| **550** |
+<div class="query-result">
+  <strong>Result: 550 items</strong>
+  <span>Observed runtime: 7.260 s</span>
+  <small>One run · DuckDB 1.5.5 · 2026-11-16</small>
+</div>
 
-Verified 2026-11-16 with DuckDB 1.5.5, in a fresh anonymous connection. January 2024 UTC; bbox-envelope overlap, not exact geometry intersection.
+<v-switch at="1">
+  <template #1>
+    <p><strong>Source:</strong> The exact January Parquet key names one object directly; no bucket listing or wildcard expansion.</p>
+  </template>
+  <template #2>
+    <p><strong>Time:</strong> Include Jan 1 at 00:00 UTC and exclude Feb 1 at 00:00 UTC.</p>
+  </template>
+  <template #3>
+    <p><strong>Spatial filter:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p>
+  </template>
+  <template #4>
+    <p><strong>Count:</strong> Return the number of records satisfying both filters.</p>
+  </template>
+  <template #5>
+    <p>The full query combines the exact source, half-open month, bbox-envelope overlap, and count.</p>
+  </template>
+</v-switch>
+
+<div class="query-caveat">Single-run wall time around execute + fetchone only; setup excluded. No warm/cold cache guarantee or benchmark claim.</div>
 
 ---
 layout: two-cols-header
@@ -142,7 +162,7 @@ layoutClass: query-results
 
 ::left::
 
-```sql
+```sql {1-13|2-8|9-10|11-12|1,13|1-13}
 SELECT count(*) AS items
 FROM iceberg_scan(
   's3://nasa-maap-data-store/' ||
@@ -159,11 +179,31 @@ WHERE datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
 
 ::right::
 
-| items |
-| ---: |
-| **550** |
+<div class="query-result">
+  <strong>Result: 550 items</strong>
+  <span>Observed runtime: 9.756 s</span>
+  <small>One run · DuckDB 1.5.5 · 2026-11-16</small>
+</div>
 
-Verified 2026-11-16 with DuckDB 1.5.5, in a fresh anonymous connection. Same January 2024 UTC interval and bbox-envelope filter; counts match.
+<v-switch at="1">
+  <template #1>
+    <p><strong>Source:</strong> Start at only the published metadata href; Iceberg follows its manifest references to data files.</p>
+  </template>
+  <template #2>
+    <p><strong>Time:</strong> Include Jan 1 at 00:00 UTC and exclude Feb 1 at 00:00 UTC.</p>
+  </template>
+  <template #3>
+    <p><strong>Spatial filter:</strong> Keep bbox envelopes overlapping (-100, 40, -90, 50), not exact geometry intersections.</p>
+  </template>
+  <template #4>
+    <p><strong>Count:</strong> Return the number of records satisfying both filters.</p>
+  </template>
+  <template #5>
+    <p>The full query combines the metadata href, half-open month, bbox-envelope overlap, and count.</p>
+  </template>
+</v-switch>
+
+<div class="query-caveat">Single-run wall time around execute + fetchone only; setup excluded. No warm/cold cache guarantee or benchmark claim.</div>
 
 ---
 layout: default

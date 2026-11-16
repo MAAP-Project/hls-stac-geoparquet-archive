@@ -20,12 +20,15 @@ The user-preferred [Development Seed Slidev template](https://github.com/develop
 
 On 2026-11-16, DuckDB 1.5.5 returned **550** HLSL30 items from both the exact January 2024 Parquet object and the static Iceberg metadata href. Both queries used `datetime >= 2024-01-01T00:00:00Z AND datetime < 2024-02-01T00:00:00Z` and bbox-envelope overlap with `(-100, 40, -90, 50)`. This is an envelope filter, not an exact geometry intersection. Anonymous `HEAD` requests to both public S3 objects returned HTTP 200.
 
-Reproduce from the repository root with the project's dev dependency group. This creates a new DuckDB connection for each source and explicitly uses empty S3 credentials rather than a credential chain:
+A single measured run on 2026-11-16 observed **7.260 s** for the direct Parquet query and **9.756 s** for the Iceberg query. Each source used a fresh DuckDB connection. `time.perf_counter()` enclosed only `execute(...).fetchone()`; extension installation/loading and secret creation happened first. These are observed single-run wall times, not a benchmark or evidence that one access path is generally faster. The run does not establish warm/cold cache or network conditions, and results will vary with environment.
+
+Reproduce from the repository root with the project's dev dependency group. The script creates a new DuckDB connection for each source and explicitly uses empty S3 credentials rather than a credential chain:
 
 ```bash
 env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
   -u AWS_PROFILE -u AWS_DEFAULT_PROFILE uv run --group dev python - <<'PY'
 import logging
+import time
 
 import duckdb
 
@@ -62,19 +65,23 @@ for label, source, extensions in [
         "CREATE SECRET anon_s3 (TYPE S3, PROVIDER CONFIG, "
         "KEY_ID '', SECRET '', REGION 'us-west-2')"
     )
+    started = time.perf_counter()
     count = connection.execute(
         f"SELECT count(*) FROM {source} WHERE {where}"
     ).fetchone()[0]
-    logging.info("%s: %s", label, count)
+    elapsed = time.perf_counter() - started
+    logging.info("%s: count=%s elapsed=%.3f seconds", label, count, elapsed)
     connection.close()
+logging.info("DuckDB version: %s", duckdb.__version__)
 PY
 ```
 
-Expected output:
+Observed output on 2026-11-16 (your times will differ):
 
 ```text
-direct parquet: 550
-static iceberg: 550
+direct parquet: count=550 elapsed=7.260 seconds
+static iceberg: count=550 elapsed=9.756 seconds
+DuckDB version: 1.5.5
 ```
 
 The monthly Parquet href pins the direct scan to one known object, so it needs no bucket listing. The Iceberg scan starts from only the published `latest.metadata.json` href and follows its file references. Do not replace the empty-credential secret with `credential_chain` when reproducing the anonymous-access test.
