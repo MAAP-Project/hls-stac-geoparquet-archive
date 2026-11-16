@@ -1,0 +1,15 @@
+{
+  "name": "hls-stac-geoparquet-archive-slides",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "slidev --host 127.0.0.1",
+    "build": "slidev build"
+  },
+  "dependencies": {
+    "@slidev/cli": "52.6.0",
+    "@slidev/theme-default": "0.25.0",
+    "vue": "3.5.22"
+  }
+}

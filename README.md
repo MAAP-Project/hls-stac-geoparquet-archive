@@ -9,6 +9,24 @@ It also publishes static Iceberg metadata at
 
 ## Development
 
+### Slides and local documentation preview
+
+The introductory deck is authored in `slides/slides.md` with a small local Slidev theme. Its built files are generated under `docs/presentation/` before MkDocs copies them into `build/presentation/`; they are ignored and are not committed. The theme borrows the MAAP website's documented blue, deep-space, green, and amber palette. See [`slides/README.md`](slides/README.md) for the palette source and template attribution.
+
+Install the project and presentation dependencies, then build the documentation and deck:
+
+```bash
+uv sync
+corepack enable
+pnpm --dir slides install --frozen-lockfile
+./scripts/build-docs-and-slides.sh
+python -m http.server --directory build 8000
+```
+
+Open <http://localhost:8000/> for the site and <http://localhost:8000/presentation/> for the deck. The preview command uses `mkdocs.offline.yml`, which skips execution of the cloud-backed notebook. This is only for local preview; the scheduled Pages workflow continues to run `uv run mkdocs build` with notebook execution enabled. The offline build renders saved notebook outputs, so it does not validate live archive queries. To build with normal notebook execution locally, run `MKDOCS_CONFIG=mkdocs.yml ./scripts/build-docs-and-slides.sh`; this keeps the generated deck and MkDocs files from overwriting each other.
+
+To edit the deck with Slidev's live preview, run `pnpm --dir slides dev` and open <http://localhost:3030/>. The combined MkDocs preview is needed to check the deck at its published nested path.
+
 ```bash
 git clone https://github.com/MAAP-project/hls-stac-parquet.git
 cd hls-stac-parquet

@@ -19,6 +19,10 @@ extra_css:
 watch:
   - docs
 
+nav:
+  - Home: index.ipynb
+  - Slides: slides.md
+
 plugins:
   - mkdocs-jupyter:
       include_source: false

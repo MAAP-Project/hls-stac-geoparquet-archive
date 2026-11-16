@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Ropa+Sans&family=Roboto+Mono:wght@400;500&display=swap');
+
+:root {
+  --maap-space: #0b1120;
+  --maap-navy: #152347;
+  --maap-blue: #00549f;
+  --maap-sky: #0098db;
+  --maap-sky-light: #a3d9f1;
+  --maap-green: #22c55e;
+  --maap-amber: #f59e0b;
+  --maap-gray: #525252;
+  --slidev-theme-primary: var(--maap-blue);
+  --slidev-theme-secondary: var(--maap-sky);
+  --slidev-theme-surface: #fff;
+  --slidev-font-family: 'Ropa Sans', sans-serif;
+  --slidev-font-family-heading: 'Ropa Sans', sans-serif;
+  --slidev-font-family-mono: 'Roboto Mono', monospace;
+}
+
+body {
+  color: #262626;
+  font-family: var(--slidev-font-family);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--slidev-font-family-heading);
+  font-weight: 400;
+}
+
+h1 { color: var(--maap-space); }
+h2 { color: var(--maap-blue); }
+a, code { color: var(--maap-blue); }
+strong { color: var(--maap-navy); }
+
+.slidev-layout.cover {
+  background: linear-gradient(130deg, var(--maap-space), var(--maap-navy) 68%, var(--maap-blue));
+  color: #fff;
+}
+
+.slidev-layout.cover h1,
+.slidev-layout.cover h2,
+.slidev-layout.cover p { color: #fff; }
+
+.slidev-layout.cover h2 { color: var(--maap-sky-light); }
+
+.slidev-layout.default h2 {
+  border-bottom: 2px solid var(--maap-sky-light);
+  padding-bottom: 0.2em;
+}
+
+li::marker { color: var(--maap-sky); }
+
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.55rem;
+  align-items: stretch;
+  margin-top: 2rem;
+}
+
+.pipeline-step {
+  background: #eaf7fc;
+  border-top: 4px solid var(--maap-sky);
+  border-radius: 0.4rem;
+  padding: 0.9rem;
+  font-size: 0.9rem;
+}
+
+.pipeline-step strong {
+  display: block;
+  color: var(--maap-blue);
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.pipeline-arrow {
+  color: var(--maap-sky);
+  align-self: center;
+  font-size: 1.6rem;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .pipeline { grid-template-columns: 1fr; }
+  .pipeline-arrow { transform: rotate(90deg); }
+}

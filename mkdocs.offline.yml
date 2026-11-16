@@ -1,0 +1,14 @@
+INHERIT: mkdocs.yml
+
+# The project notebook queries cloud-hosted archive data. Disable notebook
+# execution only for explicitly requested local/offline previews.
+plugins:
+  - mkdocs-jupyter:
+      include_source: false
+      include_requirejs: true
+      execute: false
+      allow_errors: false
+      ignore_h1_titles: true
+      remove_tag_config:
+        remove_input_tags:
+          - hide_code
