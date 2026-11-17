@@ -26,6 +26,18 @@ jobs:
           version: "0.11.*"
           enable-cache: false
 
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Activate pnpm
+        run: corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+      - name: Install slide dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
@@ -35,8 +47,14 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - name: Build docs
-        run: uv run mkdocs build
+      - name: Build docs and slides
+        run: pnpm build
+        env:
+          MKDOCS_CONFIG: mkdocs.yml
+          SITE_PREFIX: /hls-stac-geoparquet-archive
+
+      - name: Verify slides in Pages artifact
+        run: python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive --browser google-chrome
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

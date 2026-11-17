@@ -1,0 +1,16 @@
+{
+  "name": "hls-stac-geoparquet-archive-slides",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "slidev docs/presentations/esdis-tech-spotlight-2026-11-17/slides.md",
+    "build:slides": "bash scripts/build-slides.sh",
+    "build": "./scripts/build-docs-and-slides.sh"
+  },
+  "dependencies": {
+    "@slidev/cli": "52.6.0",
+    "@slidev/theme-default": "0.25.0",
+    "vue": "3.5.45"
+  }
+}

@@ -9,6 +9,34 @@ It also publishes static Iceberg metadata at
 
 ## Development
 
+### Slides and local documentation preview
+
+The introductory deck's Markdown, MAAP theme, and README are tracked together in [`docs/presentations/esdis-tech-spotlight-2026-11-17/`](docs/presentations/esdis-tech-spotlight-2026-11-17/README.md), matching the published URL. Only generated HTML/assets are ignored. The deck README records palette provenance and template attribution.
+
+Use Node.js 22 and pnpm 9.15.0. From the repository root:
+
+```bash
+corepack enable
+corepack prepare pnpm@9.15.0 --activate
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Open <http://localhost:3030/> for Slidev's live preview. Edit `docs/presentations/esdis-tech-spotlight-2026-11-17/slides.md` or its adjacent `theme/`; changes appear without rebuilding MkDocs.
+
+To view the deck inside the documentation site:
+
+```bash
+uv sync
+pnpm build
+uv run python scripts/check-slide-site.py --browser google-chrome
+python -m http.server --directory build 8000
+```
+
+Open <http://localhost:8000/> for the site or <http://localhost:8000/presentations/esdis-tech-spotlight-2026-11-17/> for the deck. `pnpm build` stages Slidev output in `.cache/slidev/`, copies generated files alongside the deck source, then builds MkDocs into `build/`. MkDocs excludes the authoring Markdown and theme files. Slidev needs an explicit router base for its mount path. The default build targets localhost; for Pages, run `SITE_PREFIX=/hls-stac-geoparquet-archive pnpm build`, then `uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive --browser google-chrome`. Rebuild without `SITE_PREFIX` before returning to the local preview. The browser check requires Chrome or Chromium (pass its executable name); omitting `--browser` checks only HTTP links/assets, not rendered slides.
+
+**Note:** The default local build uses `mkdocs.offline.yml` to render saved notebook outputs without executing cloud queries. It does not validate archive access. Pull-request CI uses this same offline build with the Pages prefix and checks visible desktop Slides navigation, deck assets, and first-slide rendering in Chrome; it needs no AWS credentials or cloud notebook queries. Scheduled/manual Pages deployment uses `MKDOCS_CONFIG=mkdocs.yml SITE_PREFIX=/hls-stac-geoparquet-archive pnpm build`, which executes the notebook and requires cloud access. Plain `uv run mkdocs build` or `serve` does not rebuild the slides; run `pnpm build:slides` first if using those commands directly.
+
 ```bash
 git clone https://github.com/MAAP-project/hls-stac-parquet.git
 cd hls-stac-parquet
