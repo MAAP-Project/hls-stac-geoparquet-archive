@@ -27,8 +27,8 @@ Lightening the Load on CMR
 ::event::
 <p class="event-name">ESDIS Tech Spotlight</p>
 <p class="event-date">2026-11-17</p>
-<p class="event-presenter">Henry Rodman · Development Seed</p>
-<p class="event-affiliation">MAAP Project</p>
+<p class="event-presenter">Henry Rodman - Development Seed</p>
+<p class="event-affiliation">Office of Data Science and Informatics<br> NASA Marshall Space Flight Center</p>
 
 <!--
 Opening · about 30 seconds

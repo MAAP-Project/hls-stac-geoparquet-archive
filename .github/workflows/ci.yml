@@ -39,7 +39,7 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
-  slides:
+  docs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
@@ -68,12 +68,12 @@ jobs:
           uv sync --locked
           pnpm install --frozen-lockfile
 
-      - name: Build offline documentation and slides
+      - name: Build documentation
         run: pnpm build
         env:
           SITE_PREFIX: /hls-stac-geoparquet-archive
 
-      - name: Verify slide links and rendering
+      - name: Verify documentation navigation and slide rendering
         run: uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive --browser google-chrome
 
   deploy:
