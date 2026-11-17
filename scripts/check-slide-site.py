@@ -18,7 +18,7 @@ from urllib.request import urlopen
 
 
 class SiteLinks(HTMLParser):
-    """Collect links from the MkDocs landing page and Slidev entry page."""
+    """Collect navigation, deck, and asset links from the built pages."""
 
     def __init__(self) -> None:
         """Initialize the collected link list and anchor state."""
@@ -48,15 +48,18 @@ class SiteLinks(HTMLParser):
             self._anchor_text += data
 
     def handle_endtag(self, tag: str) -> None:
-        """Mark the introduction-deck link after its text is available."""
+        """Mark relevant navigation and deck links after their text is available."""
         if tag == "a" and self._capture_anchor:
             self._capture_anchor = False
-            if "introduction deck" in self._anchor_text and self._anchor_href:
+            anchor_text = " ".join(self._anchor_text.split()).lower()
+            if self._anchor_href and "introduction deck" in anchor_text:
                 self.links.append("DECK_LINK:" + self._anchor_href)
+            if self._anchor_href and anchor_text == "slides":
+                self.links.append("SLIDES_LINK:" + self._anchor_href)
 
 
 def main() -> None:
-    """Fetch the landing page, its deck link, and the deck's local assets."""
+    """Verify Slides navigation, deck links, local assets, and optional rendering."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-dir", type=Path, default=Path("build"))
     parser.add_argument(
@@ -74,7 +77,7 @@ def main() -> None:
         parser.error(f"site directory does not exist: {args.site_dir}")
 
     deck_dir = args.site_dir / "presentations/esdis-tech-spotlight-2026-11-17"
-    for authoring_path in ("slides/index.html", "README/index.html", "theme"):
+    for authoring_path in ("slides/index.html", "README/index.html", "theme", "public"):
         if (deck_dir / authoring_path).exists():
             raise AssertionError(f"Authoring files leaked into site: {authoring_path}")
 
@@ -99,6 +102,25 @@ def main() -> None:
     landing_url = f"{origin}{prefix}/slides/"
 
     try:
+        homepage_url = f"{origin}{prefix}/"
+        with urlopen(homepage_url) as response:
+            homepage_html = response.read().decode()
+            assert response.status == 200
+        homepage_links = SiteLinks()
+        homepage_links.feed(homepage_html)
+        slides_link = next(
+            link.removeprefix("SLIDES_LINK:")
+            for link in homepage_links.links
+            if link.startswith("SLIDES_LINK:")
+        )
+        slides_url = urljoin(homepage_url, slides_link)
+        expected_landing_path = f"{prefix}/slides/"
+        if urlsplit(slides_url).path != expected_landing_path:
+            raise AssertionError(
+                f"Slides navigation resolves to {slides_url}, "
+                f"expected path {expected_landing_path}"
+            )
+
         with urlopen(landing_url) as response:
             landing_html = response.read().decode()
             assert response.status == 200
@@ -163,7 +185,11 @@ def main() -> None:
                     )
             logging.info("Browser rendered the first slide at %s", deck_url)
         logging.info(
-            "OK: %s -> %s; fetched %d deck assets", landing_url, deck_url, len(assets)
+            "OK: %s -> %s -> %s; fetched %d deck assets",
+            homepage_url,
+            landing_url,
+            deck_url,
+            len(assets),
         )
     finally:
         server.shutdown()

@@ -11,6 +11,6 @@
   "dependencies": {
     "@slidev/cli": "52.6.0",
     "@slidev/theme-default": "0.25.0",
-    "vue": "3.5.22"
+    "vue": "3.5.45"
   }
 }
