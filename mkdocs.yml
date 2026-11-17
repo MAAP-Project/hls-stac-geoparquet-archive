@@ -28,7 +28,8 @@ watch:
 
 nav:
   - Home: index.ipynb
-  - Slides: slides.md
+  - Slides:
+      - ESDIS Tech Spotlight · November 17, 2026: presentations/esdis-tech-spotlight-2026-11-17/
 
 plugins:
   - mkdocs-jupyter:

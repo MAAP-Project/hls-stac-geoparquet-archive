@@ -52,10 +52,8 @@ class SiteLinks(HTMLParser):
         if tag == "a" and self._capture_anchor:
             self._capture_anchor = False
             anchor_text = " ".join(self._anchor_text.split()).lower()
-            if self._anchor_href and "introduction deck" in anchor_text:
+            if self._anchor_href and "esdis tech spotlight" in anchor_text:
                 self.links.append("DECK_LINK:" + self._anchor_href)
-            if self._anchor_href and anchor_text == "slides":
-                self.links.append("SLIDES_LINK:" + self._anchor_href)
 
 
 def main() -> None:
@@ -99,7 +97,6 @@ def main() -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     origin = f"http://127.0.0.1:{server.server_port}"
-    landing_url = f"{origin}{prefix}/slides/"
 
     try:
         homepage_url = f"{origin}{prefix}/"
@@ -108,30 +105,12 @@ def main() -> None:
             assert response.status == 200
         homepage_links = SiteLinks()
         homepage_links.feed(homepage_html)
-        slides_link = next(
-            link.removeprefix("SLIDES_LINK:")
-            for link in homepage_links.links
-            if link.startswith("SLIDES_LINK:")
-        )
-        slides_url = urljoin(homepage_url, slides_link)
-        expected_landing_path = f"{prefix}/slides/"
-        if urlsplit(slides_url).path != expected_landing_path:
-            raise AssertionError(
-                f"Slides navigation resolves to {slides_url}, "
-                f"expected path {expected_landing_path}"
-            )
-
-        with urlopen(landing_url) as response:
-            landing_html = response.read().decode()
-            assert response.status == 200
-        links = SiteLinks()
-        links.feed(landing_html)
         deck_link = next(
             link.removeprefix("DECK_LINK:")
-            for link in links.links
+            for link in homepage_links.links
             if link.startswith("DECK_LINK:")
         )
-        deck_url = urljoin(landing_url, deck_link)
+        deck_url = urljoin(homepage_url, deck_link)
         expected_deck_path = f"{prefix}/presentations/esdis-tech-spotlight-2026-11-17/"
         if urlsplit(deck_url).path != expected_deck_path:
             raise AssertionError(
@@ -160,7 +139,58 @@ def main() -> None:
                     raise AssertionError(f"asset request failed: {asset_url}")
                 response.read()
         if args.browser:
-            with TemporaryDirectory(prefix="slidev-browser-") as profile:
+            with (
+                TemporaryDirectory(prefix="slidev-browser-") as profile,
+                TemporaryDirectory(
+                    dir=args.site_dir, prefix="navigation-check-"
+                ) as probe,
+            ):
+                # Check computed visibility in a desktop-sized, same-origin homepage.
+                probe_path = Path(probe) / "index.html"
+                probe_path.write_text(
+                    """<!doctype html>
+<html><body>
+<iframe src="../" width="1280" height="800" onload="
+const doc = this.contentDocument;
+const sidebar = doc.querySelector('.md-sidebar--primary');
+const section = Array.from(sidebar.querySelectorAll('label')).find(label =>
+    label.textContent.trim() === 'Slides');
+const toggle = section &amp;&amp; doc.getElementById(section.htmlFor);
+if (toggle &amp;&amp; !toggle.checked) section.click();
+const visible = toggle &amp;&amp; toggle.checked &amp;&amp;
+    Array.from(sidebar.querySelectorAll('a')).some(link =>
+        link.textContent.trim().startsWith('ESDIS Tech Spotlight') &amp;&amp;
+        link.checkVisibility({visibilityProperty: true}) &amp;&amp;
+        link.getBoundingClientRect().width > 0);
+document.body.dataset.navigationVisible = String(visible);
+"></iframe>
+</body></html>
+""",
+                    encoding="utf-8",
+                )
+                probe_url = f"{origin}{prefix}/{Path(probe).name}/"
+                navigation = subprocess.run(
+                    [
+                        args.browser,
+                        "--headless=new",
+                        "--no-sandbox",
+                        "--disable-gpu",
+                        "--no-first-run",
+                        "--window-size=1440,1000",
+                        f"--user-data-dir={profile}",
+                        "--virtual-time-budget=5000",
+                        "--dump-dom",
+                        probe_url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=45,
+                )
+                if 'data-navigation-visible="true"' not in navigation.stdout:
+                    raise AssertionError(
+                        f"Slides navigation is not visible at {homepage_url}"
+                    )
                 result = subprocess.run(
                     [
                         args.browser,
@@ -183,11 +213,13 @@ def main() -> None:
                         f"First slide did not render at {deck_url}; "
                         "check the Slidev router base path"
                     )
+            logging.info(
+                "Browser verified visible Slides navigation at %s", homepage_url
+            )
             logging.info("Browser rendered the first slide at %s", deck_url)
         logging.info(
-            "OK: %s -> %s -> %s; fetched %d deck assets",
+            "OK: %s -> %s; fetched %d deck assets",
             homepage_url,
-            landing_url,
             deck_url,
             len(assets),
         )

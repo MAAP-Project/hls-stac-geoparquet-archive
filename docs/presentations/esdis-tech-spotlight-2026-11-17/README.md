@@ -21,7 +21,7 @@ uv run python scripts/check-slide-site.py --browser google-chrome
 python -m http.server --directory build 8000
 ```
 
-The default build uses saved notebook outputs (`mkdocs.offline.yml`), without cloud queries. Open <http://localhost:8000/> and choose **Slides** in the MkDocs navigation. For GitHub Pages:
+The default build uses saved notebook outputs (`mkdocs.offline.yml`), without cloud queries. Open <http://localhost:8000/>, expand **Slides** in the MkDocs navigation, and select the presentation to open the deck directly. Add future decks under the same `nav` section in `mkdocs.yml`. MkDocs warns that the directory link is not a documentation file because Slidev, rather than MkDocs, generates that page. For GitHub Pages:
 
 ```bash
 SITE_PREFIX=/hls-stac-geoparquet-archive pnpm build
