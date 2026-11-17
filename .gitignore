@@ -18,6 +18,9 @@ infrastructure/cdk.out/
 /docs/presentations/esdis-tech-spotlight-2026-11-17/404.html
 /docs/presentations/esdis-tech-spotlight-2026-11-17/_redirects
 /docs/presentations/esdis-tech-spotlight-2026-11-17/assets/
+# Slidev copies these from the tracked presentation public/ directory.
+/docs/presentations/esdis-tech-spotlight-2026-11-17/images/
+/docs/presentations/esdis-tech-spotlight-2026-11-17/examples/
 .cache/
 
 docs/.ipynb_checkpoints/

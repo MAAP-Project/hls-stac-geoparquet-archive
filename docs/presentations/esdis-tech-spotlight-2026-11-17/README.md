@@ -1,180 +1,78 @@
-# Slide deck
+# ESDIS Tech Spotlight: HLS STAC GeoParquet Archive
 
-Edit [`slides.md`](slides.md) and the local theme under `theme/`. The theme is intentionally small and uses Slidev's default layouts rather than bringing in the sibling template's custom components and demo assets.
+November 17, 2026 · Henry Rodman, Development Seed · MAAP Project
 
-## Palette provenance
+## Edit and build
 
-The colors are sourced from `src/css/custom.css` in [MAAP-Project/maap-website](https://github.com/MAAP-Project/maap-website/blob/main/src/css/custom.css), retrieved from its default branch on 2026-11-16. The theme uses the site's deep-space `#0b1120` and `#152347`, primary blue `#00549f`, interactive blue `#0098db`, blue tint `#a3d9f1`, green `#22c55e`, and amber `#f59e0b`. Ropa Sans follows the website's declared brand font. These are palette and typography references, not an official MAAP design-system package.
-
-## Light and dark mode
-
-The theme follows Slidev's built-in light/dark toggle (`html.dark`). Semantic variables in `theme/styles.css` control text, headings, links, muted notes, and card backgrounds in both modes. Slide titles use 2.5rem text with space below, section headings use 1.75rem, and the cover title uses 3.5rem. The cover keeps its dark MAAP gradient in either mode. Use `text-muted` for secondary text rather than a fixed gray utility.
-
-`theme/setup/shiki.ts` selects Shiki's GitHub light/dark palettes; code backgrounds match those palettes. Inline code uses the theme accent without overriding highlighted code tokens. When changing colors, check both modes, including the pipeline and SQL slides.
-
-## Template attribution
-
-The user-preferred [Development Seed Slidev template](https://github.com/developmentseed/ds-slidev-template) was inspected at local reference commit `ba87b3b882c19df868e3b834c13be22f7bb05351`. Its use of a local Slidev theme entry point and CSS custom properties informed the structure here. No external-repository runtime dependency or DevSeed-branded component, font, image, or styling was included.
-
-## Anonymous SQL comparison: one month and six months
-
-All four queries were run on 2026-11-16 with DuckDB 1.5.5, a fresh connection per query, and explicitly empty S3 credentials. They use HLSL30, bbox-envelope overlap with `(-100, 40, -90, 50)` (not exact geometry intersection), and half-open UTC intervals: January `[2024-01-01, 2024-02-01)` and six months `[2024-01-01, 2024-07-01)`. Anonymous `HEAD` requests to the public January Parquet object and Iceberg metadata href had previously returned HTTP 200.
-
-The direct six-month query enumerates the six exact monthly Parquet keys. It does not use a glob or discover keys by bucket listing. Iceberg uses the same `latest.metadata.json` entrypoint for either interval; its metadata and manifests reference the relevant data files. This illustrates a simpler table entrypoint, not guaranteed faster performance.
-
-Observed single-run results:
-
-| Query | Items | Wall time |
-| --- | ---: | ---: |
-| Direct January object | 550 | 7.761 s |
-| Iceberg January | 550 | 9.846 s |
-| Direct six explicit objects | 5,101 | 10.369 s |
-| Iceberg six-month scan | 5,101 | 12.105 s |
-
-`time.perf_counter()` covered `connection.sql(query)` plus `relation.fetchone()`; extension install/load, anonymous secret creation, prefix-variable setup, and the later `relation.show()` call were outside the timer. The transcript is captured by a separate untimed `relation.show()` call after the count fetch. Because DuckDB relations are lazy, `show()` may execute or fetch the query again to render the output; the displayed transcript is not evidence that formatting reused the timed fetch. The two six-month results match. These are one-run observations, not benchmark results; they establish no warm/cold cache or network conditions, nor a general performance comparison. A later verification run returned the same counts with observed times of 2.863, 9.802, 10.236, and 12.350 seconds in table order. The slides show the initial run, not an average; the variation is why these times should not be read as a performance comparison.
-
-Reproduce from the repository root with the project's dev dependency group. AWS credential/profile variables are unset, each query gets a fresh connection, and the query source for the direct six-month scan lists months 1 through 6 explicitly:
+From the repository root, use Node.js 22 and pnpm 9.15.0:
 
 ```bash
-env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-  -u AWS_PROFILE -u AWS_DEFAULT_PROFILE uv run --group dev python - <<'PY'
-import contextlib
-import io
-import logging
-import time
-
-import duckdb
-
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-prefix = (
-    "s3://nasa-maap-data-store/file-staging/nasa-map/"
-    "hls-stac-geoparquet-archive/v2/HLSL30_2.0/"
-)
-jan = """
-datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
-AND datetime < TIMESTAMPTZ '2024-02-01 00:00:00+00'
-AND bbox.xmin <= -90 AND bbox.xmax >= -100
-AND bbox.ymin <= 50 AND bbox.ymax >= 40
-"""
-six_months = """
-datetime >= TIMESTAMPTZ '2024-01-01 00:00:00+00'
-AND datetime < TIMESTAMPTZ '2024-07-01 00:00:00+00'
-AND bbox.xmin <= -90 AND bbox.xmax >= -100
-AND bbox.ymin <= 50 AND bbox.ymax >= 40
-"""
-month_paths = ",\n  ".join(
-    f"getvariable('hls_prefix') || 'year=2024/month={month}/HLSL30_2.0-2024-{month}.parquet'"
-    for month in range(1, 7)
-)
-queries = [
-    (
-        "direct January",
-        f"SELECT count(*) AS items FROM read_parquet(getvariable('hls_prefix') || 'year=2024/month=1/HLSL30_2.0-2024-1.parquet') WHERE {jan}",
-        "INSTALL httpfs; LOAD httpfs;",
-    ),
-    (
-        "Iceberg January",
-        f"SELECT count(*) AS items FROM iceberg_scan(getvariable('hls_prefix') || 'iceberg/metadata/latest.metadata.json') WHERE {jan}",
-        "INSTALL httpfs; LOAD httpfs; INSTALL iceberg; LOAD iceberg;",
-    ),
-    (
-        "direct six months",
-        f"""SELECT count(*) AS items FROM read_parquet([
-  {month_paths}
-]) WHERE {six_months}""",
-        "INSTALL httpfs; LOAD httpfs;",
-    ),
-    (
-        "Iceberg six months",
-        f"SELECT count(*) AS items FROM iceberg_scan(getvariable('hls_prefix') || 'iceberg/metadata/latest.metadata.json') WHERE {six_months}",
-        "INSTALL httpfs; LOAD httpfs; INSTALL iceberg; LOAD iceberg;",
-    ),
-]
-for label, query, extensions in queries:
-    connection = duckdb.connect()
-    connection.execute(extensions)
-    connection.execute(
-        "CREATE SECRET anon_s3 (TYPE S3, PROVIDER CONFIG, "
-        "KEY_ID '', SECRET '', REGION 'us-west-2')"
-    )
-    connection.execute(f"SET VARIABLE hls_prefix = '{prefix}'")
-    started = time.perf_counter()
-    relation = connection.sql(query)
-    count = relation.fetchone()[0]
-    elapsed = time.perf_counter() - started
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        relation.show()
-    logging.info(
-        "%s: count=%s elapsed=%.3f seconds\n%s",
-        label,
-        count,
-        elapsed,
-        output.getvalue().rstrip(),
-    )
-    connection.close()
-logging.info("DuckDB version: %s", duckdb.__version__)
-PY
-```
-
-Observed output from the run above:
-
-```text
-direct January: count=550 elapsed=7.761 seconds
-┌───────┐
-│ items │
-│ int64 │
-├───────┤
-│   550 │
-└───────┘
-Iceberg January: count=550 elapsed=9.846 seconds
-┌───────┐
-│ items │
-│ int64 │
-├───────┤
-│   550 │
-└───────┘
-direct six months: count=5101 elapsed=10.369 seconds
-┌───────┐
-│ items │
-│ int64 │
-├───────┤
-│  5101 │
-└───────┘
-Iceberg six months: count=5101 elapsed=12.105 seconds
-┌───────┐
-│ items │
-│ int64 │
-├───────┤
-│  5101 │
-└───────┘
-DuckDB version: 1.5.5
-```
-
-Do not replace the empty-credential secret with `credential_chain` when reproducing this anonymous-access check.
-
-## Build
-
-Run these commands from the repository root (Node.js 22, pnpm 9.15.0):
-
-```bash
+corepack enable
+corepack prepare pnpm@9.15.0 --activate
 pnpm install --frozen-lockfile
-pnpm dev          # Live editing at http://localhost:3030/
-pnpm build        # Build the deck and offline MkDocs site
+pnpm dev
 ```
 
-All deck materials live in `docs/presentations/esdis-tech-spotlight-2026-11-17/`:
+Edit `slides.md` and `theme/`. Preview at <http://localhost:3030/>; Slidev's built-in toggle switches light/dark mode. Speaker notes contain presentation guidance. Allow roughly 37–40 minutes plus discussion, and rehearse the click reveals.
 
-```text
-slides.md       # Tracked Slidev source
-README.md       # Tracked authoring notes
-theme/          # Tracked local MAAP theme
-index.html      # Generated, ignored
-404.html        # Generated, ignored
-_redirects      # Generated, ignored
-assets/         # Generated, ignored; put source images in public/ instead
+```bash
+pnpm build
+uv run python scripts/check-slide-site.py --browser google-chrome
+python -m http.server --directory build 8000
 ```
 
-`pnpm build:slides` stages output in `.cache/slidev/esdis-tech-spotlight-2026-11-17/`, then copies generated files alongside the source without deleting Markdown or theme files. MkDocs excludes `slides.md`, this README, and `theme/` from its site build and copies the generated deck to the matching path under `build/`. The site endpoint is `presentations/esdis-tech-spotlight-2026-11-17/`. Slidev's router requires an explicit mount path. The default build uses `/presentations/esdis-tech-spotlight-2026-11-17/`. For GitHub Pages, set `SITE_PREFIX=/hls-stac-geoparquet-archive` when running `pnpm build` or `pnpm build:slides`. Rebuild without that variable for localhost; a Pages build is not interchangeable with a root-mounted local preview.
+The default build uses saved notebook outputs (`mkdocs.offline.yml`), without cloud queries. Open <http://localhost:8000/> and choose **Slides** in the MkDocs navigation. For GitHub Pages:
 
-For a site preview, run `python -m http.server --directory build 8000`. For MkDocs live preview, run `pnpm build:slides` followed by `uv run mkdocs serve --config-file mkdocs.offline.yml`; slide edits need another `pnpm build:slides`. Use `pnpm dev` instead for Slidev hot reload. See the root README for cloud-backed notebook execution.
+```bash
+SITE_PREFIX=/hls-stac-geoparquet-archive pnpm build
+uv run python scripts/check-slide-site.py --prefix /hls-stac-geoparquet-archive --browser google-chrome
+```
+
+Rebuild without `SITE_PREFIX` for localhost. The scheduled/manual Pages deployment additionally sets `MKDOCS_CONFIG=mkdocs.yml` to execute the cloud-backed notebook; see the root README for its access requirements.
+
+- `slides.md`, `theme/`, and `public/` are authoring inputs to commit.
+- `.cache/`, generated HTML, `assets/`, `images/`, `examples/`, and `build/` are ignored outputs. Put source images in `public/images/`, never `assets/`.
+- The build stages Slidev output in `.cache/slidev/`, copies it alongside the source, then builds MkDocs. MkDocs excludes the authoring files and copies the generated deck.
+- `pnpm dev` supports hot reload. Plain MkDocs commands do not rebuild the deck; run `pnpm build:slides` first.
+
+Published deck: <https://maap-project.github.io/hls-stac-geoparquet-archive/presentations/esdis-tech-spotlight-2026-11-17/>. The closing QR code encodes this URL, not a local preview.
+
+## Example context
+
+The archive contains granule metadata and raster links, not imagery. Exact metadata objects can be read anonymously; S3 globs need bucket-listing credentials, and HLS imagery retains its Earthdata access requirements. This is an unofficial metadata copy, not a live STAC catalog.
+
+The publisher rebuilds static Iceberg metadata over the existing monthly Parquet files. It does not maintain incremental snapshot history or guarantee snapshot isolation during replacement of those files. Proposed notification-driven ingestion and icestac integration are future work, not deployed capabilities. “Lightening the Load on CMR” is a design goal, not a measured traffic reduction.
+
+The metadata comparison uses `HLS.L30.T14TQT.2024001T170441.v2.0`, inspected on November 16, 2026:
+
+- [CMR converted STAC](https://cmr.earthdata.nasa.gov/search/granules.stac?concept_id=G2830065733-LPCLOUD&collection_concept_id=C2021957657-LPCLOUD).
+- [CMR STAC search](https://cmr.earthdata.nasa.gov/stac/LPCLOUD/search?collections=HLSL30.v2.0&ids=HLS.L30.T14TQT.2024001T170441.v2.0&limit=1).
+- [Producer STAC item](https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-public/HLSL30.020/HLS.L30.T14TQT.2024001T170441.v2.0/HLS.L30.T14TQT.2024001T170441.v2.0_stac.json).
+
+These excerpts illustrate this granule, not every HLS record. The archive adds a collection field and stores timestamps at millisecond precision, so conversion is not byte-for-byte lossless. Footprint coordinates are geographic; raster `proj:epsg` is a separate CRS. SQL bbox overlap is not exact polygon intersection.
+
+The rustac query returned three item dictionaries from the displayed public HTTPS object. Both January–June DuckDB count queries returned 5,101 items with anonymous credentials on November 16, 2026. Results are captured examples, not live slide execution or a performance benchmark. Iceberg simplifies file discovery, not necessarily query time.
+
+`public/examples/hls-array.html` is a saved lazycogs/Xarray representation copied from Henry Rodman's local `lazycogs` FOSS4G NA 2026 deck; `xarray.css` adapts its display in a sandboxed iframe. It came from a prepared local Parquet index, not the slide's credentialed MAAP S3-glob adaptation, which was not rerun. Approximately 15 TB is the logical view size, not downloaded pixels. The teaser API is pseudocode. Neither example demonstrates a computed image or biomass result; masking, gaps, overlaps, compositing, and resampling need explicit policies.
+
+## Assets and attribution
+
+Images illustrate the narrative, not archive coverage or generated science results. Credits are also visible on the slides. Attribution does not grant a new license for third-party images or logos.
+
+| Asset in `public/images/` | Source |
+| --- | --- |
+| `maap-logo.png` | [NASA MAAP website logo](https://maap-project.org/wp-content/uploads/2025/04/cropped-nasamaaplogo3.png), retrieved November 16, 2026; not a joint NASA/ESA lockup |
+| `hls-constellations.png` | [NASA HLS](https://hls.gsfc.nasa.gov/wp-content/uploads/2026/03/Landsat-and-Sentinel-2-satellites-included-in-HLS-1.png), retrieved November 16, 2026 |
+| `boreal-forest-biomass-density.png` | [ESA boreal forest aboveground biomass density](https://www.esa.int/ESA_Multimedia/Images/2021/10/Boreal_Forest_Above_Ground_Biomass_Density) |
+| `lena-delta.jpg` | [Development Seed template asset](https://github.com/developmentseed/ds-slidev-template/blob/ba87b3b882c19df868e3b834c13be22f7bb05351/public/images/theme/lena-delta.jpg); original photographer/license not established by that template |
+| `landsat8-ord-river-australia.jpg` | [USGS on Unsplash: Ord River](https://unsplash.com/photos/2BThgnOYoIc) |
+| `landsat9-bangladesh-coast.jpg` | [USGS on Unsplash: Bangladesh coast](https://unsplash.com/photos/eGGENWtikd0) |
+| `landsat9-apostle-islands-lake-superior.jpg` | [USGS on Unsplash: Apostle Islands](https://unsplash.com/photos/j7HqdQqn7Jo) |
+| `landsat9-kangerdlugssuaq-greenland.jpg` | [USGS on Unsplash: Kangerdlugssuaq Glacier](https://unsplash.com/photos/PgL1p8TBGNQ) |
+| `slides-qr.svg` | Generated locally with Python `qrcode`, medium error correction and four-module quiet zone; white background for both themes |
+
+The Landsat images were sourced from the Development Seed template at commit `ba87b3b882c19df868e3b834c13be22f7bb05351` and resized to a maximum dimension of 1,920 pixels at JPEG quality 85 (about 2.7 MB combined instead of 16.6 MB). Lena Delta remains unchanged.
+
+The local theme and opening layout adapt the [Development Seed Slidev template](https://github.com/developmentseed/ds-slidev-template) at that same commit, without its branding or runtime components. Colors and Ropa Sans follow [MAAP website CSS](https://github.com/MAAP-Project/maap-website/blob/main/src/css/custom.css), inspected November 16, 2026; this is not an official design-system package. Fonts load from Google Fonts, with CSS fallbacks.
+
+The original JSON-to-table illustrations reference [Pete Gadomski's cloud-native metadata presentation](https://www.gadom.ski/presentations/2025-11-04-stac-geoparquet.html#/4/2); no presentation images were copied. The Iceberg diagram follows the [official specification](https://iceberg.apache.org/spec/#overview) and [PyIceberg Add Files](https://py.iceberg.apache.org/api/#add-files).
